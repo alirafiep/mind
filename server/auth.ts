@@ -90,7 +90,8 @@ export async function verifyGoogleCredential(params: {
       if (!info.email || (info.email_verified !== 'true' && info.email_verified !== true)) {
         return null;
       }
-      if (process.env.GOOGLE_CLIENT_ID && info.aud !== process.env.GOOGLE_CLIENT_ID) {
+      const expectedClientId = process.env.GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID;
+      if (expectedClientId && info.aud !== expectedClientId) {
         return null;
       }
       const displayName = (info.name || info.given_name || '').trim();

@@ -12,6 +12,7 @@ import type {
   LibraryFolder,
   LibraryItem,
   LibraryItemType,
+  PinnedPrompt,
   SubscriptionInfo,
   Theme,
   UserProfile,
@@ -121,6 +122,41 @@ export const api = {
 
   deleteChat: (chatId: string) =>
     apiFetch<{ deleted: boolean }>(`/api/chats/${encodeURIComponent(chatId)}`, {
+      method: 'DELETE',
+    }),
+
+  // Pinned Prompts
+  getPinnedPrompts: () => apiFetch<{ pinnedPrompts: PinnedPrompt[] }>('/api/pinned-prompts'),
+
+  pinPrompt: (payload: {
+    prompt: string;
+    title?: string;
+    category?: string;
+    chatId?: string;
+    messageId?: string;
+    createdAt?: number;
+  }) =>
+    apiFetch<{ pinnedPrompt: PinnedPrompt }>('/api/pinned-prompts', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  updatePinnedPrompt: (
+    id: string,
+    updates: {
+      title?: string;
+      category?: string;
+      order?: number;
+      prompt?: string;
+    }
+  ) =>
+    apiFetch<{ pinnedPrompt: PinnedPrompt }>(`/api/pinned-prompts/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(updates),
+    }),
+
+  unpinPrompt: (id: string) =>
+    apiFetch<{ deleted: boolean }>(`/api/pinned-prompts/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     }),
 

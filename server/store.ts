@@ -8,6 +8,7 @@ import type {
   LanguagePreference,
   LibraryFolder,
   LibraryItem,
+  PinnedPrompt,
   SubscriptionInfo,
   Theme,
   UserProfile,
@@ -54,6 +55,7 @@ interface DatabaseSchema {
   subscriptions: Record<string, ServerSubscriptionRecord>;
   guestImageUsage: Record<string, { date: string; count: number }>;
   chats: Record<string, ChatSession[]>;
+  pinnedPrompts: Record<string, PinnedPrompt[]>;
   folders: Record<string, LibraryFolder[]>;
   library: Record<string, LibraryItem[]>;
   sharedChats: Record<string, SharedChatSnapshot>;
@@ -82,6 +84,7 @@ function createEmptyDb(): DatabaseSchema {
     subscriptions: {},
     guestImageUsage: {},
     chats: {},
+    pinnedPrompts: {},
     folders: {},
     library: {},
     sharedChats: {},
@@ -100,6 +103,7 @@ function loadDb(): DatabaseSchema {
       subscriptions: parsed.subscriptions || {},
       guestImageUsage: parsed.guestImageUsage || {},
       chats: parsed.chats || {},
+      pinnedPrompts: parsed.pinnedPrompts || {},
       folders: parsed.folders || {},
       library: parsed.library || {},
       sharedChats: parsed.sharedChats || {},
@@ -150,6 +154,29 @@ export function isUsernameAvailable(username: string, excludeUserId?: string): b
   return true;
 }
 
+function assignDefaultUniqueUsername(baseName: string, excludeUserId?: string): string {
+  const cleanedBase = baseName
+    .trim()
+    .replace(/^@+/, '')
+    .replace(/[^a-zA-Z0-9_ .-]/g, '')
+    .replace(/\s+/g, ' ')
+    .slice(0, 20)
+    .trim();
+
+  const seed = cleanedBase.length >= 2 ? cleanedBase : 'Google User';
+  if (validateUsername(seed).valid && isUsernameAvailable(seed, excludeUserId)) {
+    return seed;
+  }
+
+  for (let i = 2; i < 10000; i++) {
+    const candidate = `${seed.slice(0, 18).trim()}${i}`;
+    if (validateUsername(candidate).valid && isUsernameAvailable(candidate, excludeUserId)) {
+      return candidate;
+    }
+  }
+  return `User${Date.now().toString().slice(-6)}`;
+}
+
 export function getOrCreateUser(params: {
   email: string;
   name: string;
@@ -166,16 +193,22 @@ export function getOrCreateUser(params: {
     if (safeName !== 'Google User' || !existing.name) {
       existing.name = safeName;
     }
+    if (!existing.username) {
+      existing.username = assignDefaultUniqueUsername(existing.name, existing.id);
+    }
     if (params.avatarUrl) existing.avatarUrl = params.avatarUrl;
     if (params.authProvider === 'google') existing.authProvider = 'google';
     void persistDb();
     return existing;
   }
 
+  const defaultUsername = assignDefaultUniqueUsername(safeName, userId);
+
   const created: UserProfile = {
     id: userId,
     email: normalizedEmail,
     name: safeName,
+    username: defaultUsername,
     avatarUrl: params.avatarUrl,
     authProvider: params.authProvider,
     customInstructions: { ...DEFAULT_INSTRUCTIONS },
@@ -196,6 +229,7 @@ export function getOrCreateUser(params: {
     transactions: [],
   };
   dbState.chats[userId] = [];
+  dbState.pinnedPrompts[userId] = [];
   dbState.folders[userId] = [
     {
       id: 'fld_projects',
@@ -434,6 +468,97 @@ export async function deleteUserChat(userId: string, chatId: string): Promise<bo
   const next = list.filter((c) => c.id !== chatId);
   if (next.length === list.length) return false;
   dbState.chats[userId] = next;
+  await persistDb();
+  return true;
+}
+
+// Pinned Prompts
+export function getUserPinnedPrompts(userId: string): PinnedPrompt[] {
+  return (dbState.pinnedPrompts[userId] || []).slice().sort((a, b) => {
+    if (a.order !== b.order) return a.order - b.order;
+    return b.pinnedAt - a.pinnedAt;
+  });
+}
+
+export async function createPinnedPrompt(
+  userId: string,
+  payload: {
+    prompt: string;
+    title?: string;
+    category?: string;
+    chatId?: string;
+    messageId?: string;
+    createdAt?: number;
+  }
+): Promise<PinnedPrompt> {
+  if (!dbState.pinnedPrompts[userId]) dbState.pinnedPrompts[userId] = [];
+  const list = dbState.pinnedPrompts[userId];
+
+  const cleanPrompt = payload.prompt.trim();
+  const existing = list.find(
+    (p) =>
+      (payload.messageId && p.messageId === payload.messageId) ||
+      p.prompt.trim() === cleanPrompt
+  );
+  if (existing) {
+    return existing;
+  }
+
+  const minOrder = list.reduce((min, p) => Math.min(min, p.order ?? 0), 0);
+  const now = Date.now();
+  const item: PinnedPrompt = {
+    id: 'pin_' + crypto.randomBytes(6).toString('hex'),
+    prompt: cleanPrompt,
+    title: payload.title?.trim().slice(0, 80) || undefined,
+    category: (payload.category || 'General').trim().slice(0, 32) || 'General',
+    chatId: payload.chatId,
+    messageId: payload.messageId,
+    createdAt: typeof payload.createdAt === 'number' ? payload.createdAt : now,
+    pinnedAt: now,
+    order: minOrder - 1,
+  };
+
+  list.unshift(item);
+  await persistDb();
+  return item;
+}
+
+export async function updatePinnedPrompt(
+  userId: string,
+  promptId: string,
+  updates: {
+    title?: string;
+    category?: string;
+    order?: number;
+    prompt?: string;
+  }
+): Promise<PinnedPrompt | null> {
+  const list = dbState.pinnedPrompts[userId] || [];
+  const item = list.find((p) => p.id === promptId);
+  if (!item) return null;
+
+  if (typeof updates.title === 'string') {
+    item.title = updates.title.trim().slice(0, 80) || undefined;
+  }
+  if (typeof updates.category === 'string' && updates.category.trim()) {
+    item.category = updates.category.trim().slice(0, 32);
+  }
+  if (typeof updates.order === 'number' && Number.isFinite(updates.order)) {
+    item.order = updates.order;
+  }
+  if (typeof updates.prompt === 'string' && updates.prompt.trim()) {
+    item.prompt = updates.prompt.trim();
+  }
+
+  await persistDb();
+  return item;
+}
+
+export async function deletePinnedPrompt(userId: string, promptId: string): Promise<boolean> {
+  const list = dbState.pinnedPrompts[userId] || [];
+  const next = list.filter((p) => p.id !== promptId);
+  if (next.length === list.length) return false;
+  dbState.pinnedPrompts[userId] = next;
   await persistDb();
   return true;
 }

@@ -9,6 +9,7 @@ import type {
   LibraryFolder,
   LibraryItem,
   LibraryItemType,
+  PinnedPrompt,
   SubscriptionInfo,
   Theme,
   UserProfile,
@@ -18,8 +19,16 @@ import type {
 
 const GUEST_CHATS_KEY = 'mindmaster_guest_chats_v2';
 const GUEST_LIBRARY_KEY = 'mindmaster_guest_library_v2';
+const GUEST_PINNED_PROMPTS_KEY = 'mindmaster_guest_pinned_prompts_v1';
 const THEME_KEY = 'mindmaster_theme_v2';
 const LANG_KEY = 'mindmaster_lang_v2';
+
+function sortPinnedPrompts(list: PinnedPrompt[]): PinnedPrompt[] {
+  return [...list].sort((a, b) => {
+    if (a.order !== b.order) return a.order - b.order;
+    return b.pinnedAt - a.pinnedAt;
+  });
+}
 
 const DEFAULT_SUBSCRIPTION: SubscriptionInfo = {
   tier: 'free',
@@ -86,6 +95,31 @@ interface AppContextValue {
   saveChat: (chat: ChatSession, persistToServer?: boolean) => Promise<void>;
   renameChat: (chatId: string, newTitle: string) => Promise<void>;
   deleteChat: (chatId: string) => Promise<void>;
+
+  // Pinned Prompts
+  pinnedPrompts: PinnedPrompt[];
+  pinPrompt: (payload: {
+    prompt: string;
+    title?: string;
+    category?: string;
+    chatId?: string;
+    messageId?: string;
+    createdAt?: number;
+  }) => Promise<PinnedPrompt | null>;
+  unpinPrompt: (id: string) => Promise<void>;
+  updatePinnedPrompt: (
+    id: string,
+    updates: {
+      title?: string;
+      category?: string;
+      order?: number;
+      prompt?: string;
+    }
+  ) => Promise<void>;
+  movePinnedPrompt: (id: string, direction: 'up' | 'down') => Promise<void>;
+  pendingPromptReuse: { text: string; nonce: number } | null;
+  clearPendingPromptReuse: () => void;
+  reusePromptInChat: (text: string, startNewChat?: boolean) => void;
 
   // Personal Library
   folders: LibraryFolder[];
@@ -166,6 +200,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const [chats, setChats] = useState<ChatSession[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  const [pinnedPrompts, setPinnedPrompts] = useState<PinnedPrompt[]>([]);
+  const [pendingPromptReuse, setPendingPromptReuse] = useState<{ text: string; nonce: number } | null>(null);
   const [folders, setFolders] = useState<LibraryFolder[]>([]);
   const [libraryItems, setLibraryItems] = useState<LibraryItem[]>([]);
 
@@ -236,21 +272,33 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       } else {
         setLibraryItems([]);
       }
+      const savedPins = localStorage.getItem(GUEST_PINNED_PROMPTS_KEY);
+      if (savedPins) {
+        setPinnedPrompts(sortPinnedPrompts(JSON.parse(savedPins) as PinnedPrompt[]));
+      } else {
+        setPinnedPrompts([]);
+      }
       setFolders([]);
     } catch {
       setChats([]);
       setLibraryItems([]);
+      setPinnedPrompts([]);
     }
   }, []);
 
   const loadAccountData = useCallback(async () => {
-    const [chatsRes, libRes] = await Promise.all([api.getChats(), api.getLibrary()]);
+    const [chatsRes, libRes, pinsRes] = await Promise.all([
+      api.getChats(),
+      api.getLibrary(),
+      api.getPinnedPrompts().catch(() => ({ pinnedPrompts: [] as PinnedPrompt[] })),
+    ]);
     setChats(chatsRes.chats);
     setActiveChatId((prev) =>
       prev && chatsRes.chats.some((c) => c.id === prev) ? prev : chatsRes.chats[0]?.id || null
     );
     setFolders(libRes.folders);
     setLibraryItems(libRes.items);
+    setPinnedPrompts(sortPinnedPrompts(pinsRes.pinnedPrompts));
   }, []);
 
   const refreshAccount = useCallback(async () => {
@@ -314,8 +362,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setStoredToken(res.token);
       setUser(res.user);
       setSubscription(res.subscription);
-      // Keep AuthModal open for Step 2 (preferred unique username) if user has not set one yet
-      setShowAuthModal(!res.user.username);
+      setShowAuthModal(false);
+      setActiveView('chat');
 
       // Sync any guest chats created before signing in
       try {
@@ -337,14 +385,30 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           }
           localStorage.removeItem(GUEST_LIBRARY_KEY);
         }
+        const guestPinsRaw = localStorage.getItem(GUEST_PINNED_PROMPTS_KEY);
+        if (guestPinsRaw) {
+          const guestPins = JSON.parse(guestPinsRaw) as PinnedPrompt[];
+          for (const gp of [...guestPins].reverse()) {
+            await api
+              .pinPrompt({
+                prompt: gp.prompt,
+                title: gp.title,
+                category: gp.category,
+                chatId: gp.chatId,
+                messageId: gp.messageId,
+                createdAt: gp.createdAt,
+              })
+              .catch(() => {});
+          }
+          localStorage.removeItem(GUEST_PINNED_PROMPTS_KEY);
+        }
       } catch {
         // ignore guest sync errors
       }
 
       await loadAccountData();
-      notify(`Welcome, ${res.user.username || res.user.name}!`, 'success');
     },
-    [loadAccountData, notify]
+    [loadAccountData]
   );
 
   const signInGoogle = useCallback(
@@ -362,6 +426,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     api.getSubscriptionStatus().then(setSubscription).catch(() => {});
     setChats([]);
     setActiveChatId(null);
+    setPinnedPrompts([]);
     setFolders([]);
     setLibraryItems([]);
     loadGuestState();
@@ -469,6 +534,188 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       notify('Conversation deleted.', 'info');
     },
     [activeChatId, notify, user]
+  );
+
+  // Pinned Prompts management (kept separate from normal chat history)
+  const persistGuestPinnedPrompts = (items: PinnedPrompt[]) => {
+    try {
+      localStorage.setItem(GUEST_PINNED_PROMPTS_KEY, JSON.stringify(items));
+    } catch {
+      // ignore
+    }
+  };
+
+  const pinPrompt = useCallback(
+    async (payload: {
+      prompt: string;
+      title?: string;
+      category?: string;
+      chatId?: string;
+      messageId?: string;
+      createdAt?: number;
+    }): Promise<PinnedPrompt | null> => {
+      const cleanPrompt = payload.prompt.trim();
+      if (!cleanPrompt) return null;
+
+      if (user) {
+        try {
+          const res = await api.pinPrompt(payload);
+          setPinnedPrompts((prev) => {
+            const exists = prev.some((p) => p.id === res.pinnedPrompt.id);
+            const next = exists
+              ? prev.map((p) => (p.id === res.pinnedPrompt.id ? res.pinnedPrompt : p))
+              : [res.pinnedPrompt, ...prev];
+            return sortPinnedPrompts(next);
+          });
+          notify('Prompt pinned to Pinned Prompts.', 'success');
+          return res.pinnedPrompt;
+        } catch (err) {
+          notify(err instanceof Error ? err.message : 'Failed to pin prompt.', 'error');
+          return null;
+        }
+      }
+
+      const existing = pinnedPrompts.find(
+        (p) =>
+          (payload.messageId && p.messageId === payload.messageId) ||
+          p.prompt.trim() === cleanPrompt
+      );
+      if (existing) {
+        notify('Prompt is already pinned.', 'info');
+        return existing;
+      }
+
+      const minOrder = pinnedPrompts.reduce((min, p) => Math.min(min, p.order ?? 0), 0);
+      const now = Date.now();
+      const localPin: PinnedPrompt = {
+        id: `pin_${now}_${Math.random().toString(36).slice(2, 7)}`,
+        prompt: cleanPrompt,
+        title: payload.title?.trim().slice(0, 80) || undefined,
+        category: (payload.category || 'General').trim().slice(0, 32) || 'General',
+        chatId: payload.chatId,
+        messageId: payload.messageId,
+        createdAt: typeof payload.createdAt === 'number' ? payload.createdAt : now,
+        pinnedAt: now,
+        order: minOrder - 1,
+      };
+      setPinnedPrompts((prev) => {
+        const next = sortPinnedPrompts([localPin, ...prev]);
+        persistGuestPinnedPrompts(next);
+        return next;
+      });
+      notify('Prompt pinned locally. Sign in with Google to sync across sessions.', 'success');
+      return localPin;
+    },
+    [notify, pinnedPrompts, user]
+  );
+
+  const unpinPrompt = useCallback(
+    async (id: string) => {
+      if (user) {
+        await api.unpinPrompt(id).catch(() => {});
+      }
+      setPinnedPrompts((prev) => {
+        const next = prev.filter((p) => p.id !== id);
+        if (!user) persistGuestPinnedPrompts(next);
+        return next;
+      });
+      notify('Prompt removed from Pinned Prompts.', 'info');
+    },
+    [notify, user]
+  );
+
+  const updatePinnedPrompt = useCallback(
+    async (
+      id: string,
+      updates: {
+        title?: string;
+        category?: string;
+        order?: number;
+        prompt?: string;
+      }
+    ) => {
+      if (user) {
+        const res = await api.updatePinnedPrompt(id, updates);
+        setPinnedPrompts((prev) =>
+          sortPinnedPrompts(prev.map((p) => (p.id === id ? res.pinnedPrompt : p)))
+        );
+      } else {
+        setPinnedPrompts((prev) => {
+          const next = sortPinnedPrompts(
+            prev.map((p) => {
+              if (p.id !== id) return p;
+              return {
+                ...p,
+                title:
+                  updates.title !== undefined
+                    ? updates.title.trim().slice(0, 80) || undefined
+                    : p.title,
+                category:
+                  updates.category !== undefined && updates.category.trim()
+                    ? updates.category.trim().slice(0, 32)
+                    : p.category,
+                order: updates.order !== undefined ? updates.order : p.order,
+                prompt:
+                  updates.prompt !== undefined && updates.prompt.trim()
+                    ? updates.prompt.trim()
+                    : p.prompt,
+              };
+            })
+          );
+          persistGuestPinnedPrompts(next);
+          return next;
+        });
+      }
+    },
+    [user]
+  );
+
+  const movePinnedPrompt = useCallback(
+    async (id: string, direction: 'up' | 'down') => {
+      const sorted = sortPinnedPrompts(pinnedPrompts);
+      const idx = sorted.findIndex((p) => p.id === id);
+      if (idx === -1) return;
+      const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+      if (targetIdx < 0 || targetIdx >= sorted.length) return;
+
+      const reordered = [...sorted];
+      const [moved] = reordered.splice(idx, 1);
+      reordered.splice(targetIdx, 0, moved);
+
+      const normalized = reordered.map((item, index) => ({
+        ...item,
+        order: index,
+      }));
+
+      setPinnedPrompts(normalized);
+      if (!user) {
+        persistGuestPinnedPrompts(normalized);
+        return;
+      }
+
+      await Promise.all(
+        normalized
+          .filter((item, index) => sorted[index]?.id !== item.id || item.order !== index)
+          .map((item) => api.updatePinnedPrompt(item.id, { order: item.order }).catch(() => {}))
+      );
+    },
+    [pinnedPrompts, user]
+  );
+
+  const clearPendingPromptReuse = useCallback(() => {
+    setPendingPromptReuse(null);
+  }, []);
+
+  const reusePromptInChat = useCallback(
+    (text: string, startNewChat = false) => {
+      if (startNewChat) {
+        createNewChat(false);
+      } else {
+        setActiveView('chat');
+      }
+      setPendingPromptReuse({ text, nonce: Date.now() });
+    },
+    [createNewChat]
   );
 
   // Library management
@@ -699,6 +946,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         saveChat,
         renameChat,
         deleteChat,
+        pinnedPrompts,
+        pinPrompt,
+        unpinPrompt,
+        updatePinnedPrompt,
+        movePinnedPrompt,
+        pendingPromptReuse,
+        clearPendingPromptReuse,
+        reusePromptInChat,
         folders,
         libraryItems,
         saveToLibrary,

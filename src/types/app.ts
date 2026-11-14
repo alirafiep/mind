@@ -110,6 +110,18 @@ export interface ChatSession {
   updatedAt: number;
 }
 
+export interface PinnedPrompt {
+  id: string;
+  prompt: string;
+  title?: string;
+  category: string;
+  chatId?: string;
+  messageId?: string;
+  createdAt: number;
+  pinnedAt: number;
+  order: number;
+}
+
 export type LibraryItemType =
   | 'image'
   | 'video'

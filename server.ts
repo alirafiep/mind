@@ -9,8 +9,10 @@ import {
   activateProSubscription,
   addUserLibraryItem,
   cancelProSubscription,
+  createPinnedPrompt,
   createShareSnapshot,
   createUserFolder,
+  deletePinnedPrompt,
   deleteUserChat,
   deleteUserFolder,
   deleteUserLibraryItem,
@@ -21,6 +23,7 @@ import {
   getUserById,
   getUserChats,
   getUserLibrary,
+  getUserPinnedPrompts,
   incrementGuestImageUsage,
   incrementImageUsage,
   incrementVideoUsage,
@@ -29,6 +32,7 @@ import {
   renameUserFolder,
   resolveMediaFilePath,
   saveMediaBuffer,
+  updatePinnedPrompt,
   updateUserLibraryItem,
   updateUserProfile,
   upsertUserChat,
@@ -87,18 +91,16 @@ function parseGeminiError(err: unknown): { status: number; code: string; message
   const lower = raw.toLowerCase();
   if (lower.includes('403') || lower.includes('permission_denied') || lower.includes('api_key')) {
     return {
-      status: 403,
-      code: 'API_KEY_OR_BILLING_REQUIRED',
-      message:
-        'Gemini API access requires a valid API key (or billing-enabled key for image/video models) in Settings > Secrets > GEMINI_API_KEY.',
+      status: 503,
+      code: 'AI_SERVICE_UNAVAILABLE',
+      message: 'The AI service is temporarily unavailable. Please try again shortly.',
     };
   }
   if (lower.includes('429') || lower.includes('resource_exhausted') || lower.includes('quota')) {
     return {
       status: 429,
       code: 'QUOTA_EXCEEDED',
-      message:
-        'API rate limit or free-tier quota exceeded. Please try again shortly or verify your billing-enabled API key in Settings > Secrets.',
+      message: 'The AI service is busy right now. Please try again in a few moments.',
     };
   }
   if (lower.includes('404') || lower.includes('not_found')) {
@@ -325,6 +327,7 @@ function buildChatSystemInstruction(
 ${languageDirectives[language] || languageDirectives.auto}
 
 INTELLIGENT BEHAVIOUR & INSTANT RESPONSIVENESS:
+- Answer questions across any subject or domain freely—never restrict users to predefined topics.
 - Provide complete, accurate, helpful answers immediately. Do NOT ask unnecessary confirmation questions, permission prompts, or filler follow-up questions.
 - Maintain complete context from all previous messages in the conversation and answer follow-up questions directly without asking the user to repeat prior details.
 - Structure answers cleanly using Markdown (headings, bullet lists, numbered steps, tables, and fenced code blocks with language tags like \`\`\`ts or \`\`\`python when appropriate).
@@ -364,9 +367,9 @@ app.post('/api/chat/stream', async (req: Request, res: Response) => {
   };
 
   if (!hasValidApiKey()) {
-    return res.status(400).json({
-      error: 'GEMINI_API_KEY is not configured. Please add your key in Settings > Secrets.',
-      code: 'MISSING_API_KEY',
+    return res.status(503).json({
+      error: 'AI chat service is temporarily unavailable. Please try again shortly.',
+      code: 'SERVICE_UNAVAILABLE',
     });
   }
 
@@ -524,7 +527,7 @@ app.post('/api/audio/transcribe', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Audio data is required.' });
   }
   if (!hasValidApiKey()) {
-    return res.status(400).json({ error: 'GEMINI_API_KEY is required for audio transcription.' });
+    return res.status(503).json({ error: 'Audio transcription is temporarily unavailable.' });
   }
   try {
     const ai = getAiClient();
@@ -556,7 +559,7 @@ app.post('/api/audio/tts', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Text is required for speech synthesis.' });
   }
   if (!hasValidApiKey()) {
-    return res.status(400).json({ error: 'GEMINI_API_KEY not configured.' });
+    return res.status(503).json({ error: 'Voice playback is temporarily unavailable.' });
   }
   try {
     const ai = getAiClient();
@@ -633,9 +636,9 @@ app.post('/api/image/generate', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Image prompt cannot be empty.' });
   }
   if (!hasValidApiKey()) {
-    return res.status(400).json({
-      error: 'GEMINI_API_KEY is missing. Configure a billing-enabled API key in Settings > Secrets.',
-      code: 'MISSING_API_KEY',
+    return res.status(503).json({
+      error: 'Image generation is temporarily unavailable. Please try again shortly.',
+      code: 'SERVICE_UNAVAILABLE',
     });
   }
 
@@ -822,9 +825,9 @@ app.post('/api/video/generate', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Please provide a video prompt or source image.' });
   }
   if (!hasValidApiKey()) {
-    return res.status(400).json({
-      error: 'GEMINI_API_KEY is missing. Configure a billing-enabled API key in Settings > Secrets.',
-      code: 'MISSING_API_KEY',
+    return res.status(503).json({
+      error: 'Video generation is temporarily unavailable. Please try again shortly.',
+      code: 'SERVICE_UNAVAILABLE',
     });
   }
 
@@ -967,6 +970,77 @@ app.get('/api/share/:shareId', (req: Request, res: Response) => {
     return res.status(404).json({ error: 'Shared conversation link not found or expired.' });
   }
   return res.json({ snapshot });
+});
+
+// ============================================================================
+// PINNED PROMPTS HISTORY (PER-USER PERSISTENT STORAGE)
+// ============================================================================
+
+app.get('/api/pinned-prompts', (req: Request, res: Response) => {
+  const session = extractAuthUser(req);
+  if (!session) {
+    return res.status(401).json({ error: 'Authentication required.' });
+  }
+  return res.json({ pinnedPrompts: getUserPinnedPrompts(session.uid) });
+});
+
+app.post('/api/pinned-prompts', async (req: Request, res: Response) => {
+  const session = extractAuthUser(req);
+  if (!session) {
+    return res.status(401).json({ error: 'Authentication required.' });
+  }
+  const { prompt, title, category, chatId, messageId, createdAt } = req.body as {
+    prompt?: string;
+    title?: string;
+    category?: string;
+    chatId?: string;
+    messageId?: string;
+    createdAt?: number;
+  };
+  if (!prompt || !prompt.trim()) {
+    return res.status(400).json({ error: 'Prompt text is required.' });
+  }
+  const pinnedPrompt = await createPinnedPrompt(session.uid, {
+    prompt,
+    title,
+    category,
+    chatId,
+    messageId,
+    createdAt,
+  });
+  return res.status(201).json({ pinnedPrompt });
+});
+
+app.patch('/api/pinned-prompts/:id', async (req: Request, res: Response) => {
+  const session = extractAuthUser(req);
+  if (!session) {
+    return res.status(401).json({ error: 'Authentication required.' });
+  }
+  const { title, category, order, prompt } = req.body as {
+    title?: string;
+    category?: string;
+    order?: number;
+    prompt?: string;
+  };
+  const updated = await updatePinnedPrompt(session.uid, String(req.params.id), {
+    title,
+    category,
+    order,
+    prompt,
+  });
+  if (!updated) {
+    return res.status(404).json({ error: 'Pinned prompt not found.' });
+  }
+  return res.json({ pinnedPrompt: updated });
+});
+
+app.delete('/api/pinned-prompts/:id', async (req: Request, res: Response) => {
+  const session = extractAuthUser(req);
+  if (!session) {
+    return res.status(401).json({ error: 'Authentication required.' });
+  }
+  const deleted = await deletePinnedPrompt(session.uid, String(req.params.id));
+  return res.json({ deleted });
 });
 
 // ============================================================================

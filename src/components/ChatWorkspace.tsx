@@ -15,6 +15,7 @@ import {
   Mic,
   MicOff,
   Paperclip,
+  Pin,
   Plus,
   RefreshCw,
   Send,
@@ -104,6 +105,11 @@ export function ChatWorkspace() {
     activeChat,
     createNewChat,
     saveChat,
+    pinnedPrompts,
+    pinPrompt,
+    unpinPrompt,
+    pendingPromptReuse,
+    clearPendingPromptReuse,
     saveToLibrary,
     setSubscription,
     customInstructions,
@@ -158,6 +164,16 @@ export function ChatWorkspace() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeChat?.messages.length, isStreaming, isGeneratingInlineImage]);
+
+  useEffect(() => {
+    if (!pendingPromptReuse) return;
+    setImageMode(false);
+    setInput(pendingPromptReuse.text);
+    clearPendingPromptReuse();
+    window.setTimeout(() => {
+      composerTextareaRef.current?.focus();
+    }, 40);
+  }, [clearPendingPromptReuse, pendingPromptReuse]);
 
   useEffect(() => {
     return () => {
@@ -840,15 +856,6 @@ export function ChatWorkspace() {
                       <p className="text-base sm:text-lg font-medium text-slate-500 dark:text-slate-400">
                         Where should we start?
                       </p>
-                      {user && !user.username && (
-                        <button
-                          type="button"
-                          onClick={() => setShowAuthModal(true)}
-                          className="text-xs font-medium text-indigo-600 dark:text-sky-400 hover:underline cursor-pointer"
-                        >
-                          Choose your unique username
-                        </button>
-                      )}
                     </>
                   );
                 })()}
@@ -948,19 +955,63 @@ export function ChatWorkspace() {
                           <div className="px-4 py-3 rounded-2xl rounded-tr-sm bg-indigo-600 text-white text-[15px] leading-relaxed whitespace-pre-wrap">
                             {msg.content}
                           </div>
-                          <div className="flex justify-end mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditingMsgId(msg.id);
-                                setEditingText(msg.content);
-                              }}
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
-                            >
-                              <Edit3 className="w-3 h-3" />
-                              <span>Edit</span>
-                            </button>
-                          </div>
+                          {(() => {
+                            const trimmedContent = msg.content.trim();
+                            const matchedPin = pinnedPrompts.find(
+                              (p) =>
+                                (p.messageId && p.messageId === msg.id) ||
+                                p.prompt.trim() === trimmedContent
+                            );
+                            const isPinned = Boolean(matchedPin);
+                            return (
+                              <div className="flex items-center justify-end gap-1 mt-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (matchedPin) {
+                                      void unpinPrompt(matchedPin.id);
+                                    } else {
+                                      void pinPrompt({
+                                        prompt: msg.content,
+                                        chatId: activeChat?.id,
+                                        messageId: msg.id,
+                                        createdAt: msg.timestamp,
+                                        category: msg.content.startsWith('Create image (')
+                                          ? 'Images'
+                                          : 'General',
+                                      });
+                                    }
+                                  }}
+                                  title={
+                                    isPinned
+                                      ? 'Unpin prompt from Pinned Prompts'
+                                      : 'Pin prompt to Pinned Prompts'
+                                  }
+                                  aria-label={isPinned ? 'Unpin prompt' : 'Pin prompt'}
+                                  className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs transition-all cursor-pointer ${
+                                    isPinned
+                                      ? 'text-indigo-600 dark:text-sky-400 bg-indigo-50 dark:bg-sky-500/15 font-medium opacity-100'
+                                      : 'text-slate-400 hover:text-indigo-600 dark:hover:text-sky-400 hover:bg-slate-200/60 dark:hover:bg-slate-800/70 opacity-75 group-hover:opacity-100'
+                                  }`}
+                                >
+                                  <Pin className={`w-3 h-3 ${isPinned ? 'fill-current' : ''}`} />
+                                  <span>{isPinned ? 'Pinned' : 'Pin'}</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingMsgId(msg.id);
+                                    setEditingText(msg.content);
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity cursor-pointer"
+                                >
+                                  <Edit3 className="w-3 h-3" />
+                                  <span>Edit</span>
+                                </button>
+                              </div>
+                            );
+                          })()}
                         </div>
                       )}
                     </div>

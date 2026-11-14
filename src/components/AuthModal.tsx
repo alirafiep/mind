@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AtSign, Check, Loader2, Sparkles, X } from 'lucide-react';
+import { Loader2, X } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { api } from '../services/api';
 
 declare global {
   interface Window {
@@ -10,6 +9,7 @@ declare global {
         id?: {
           initialize: (cfg: {
             client_id: string;
+            auto_select?: boolean;
             callback: (resp: { credential?: string }) => void;
           }) => void;
           renderButton: (el: HTMLElement, options: Record<string, unknown>) => void;
@@ -51,68 +51,12 @@ function GoogleLogoIcon() {
 }
 
 export function AuthModal() {
-  const {
-    showAuthModal,
-    setShowAuthModal,
-    googleClientId,
-    user,
-    signInGoogle,
-    updateProfile,
-  } = useApp();
+  const { showAuthModal, setShowAuthModal, googleClientId, user, theme, signInGoogle } = useApp();
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [gsiReady, setGsiReady] = useState(false);
   const googleBtnRef = useRef<HTMLDivElement | null>(null);
-
-  // Step 2: Preferred unique username after Google Sign-In
-  const [usernameInput, setUsernameInput] = useState('');
-  const [checkingUsername, setCheckingUsername] = useState(false);
-  const [usernameStatus, setUsernameStatus] = useState<{
-    available: boolean;
-    reason?: string;
-  } | null>(null);
-
-  useEffect(() => {
-    if (user && !user.username && showAuthModal) {
-      const suggested = user.name
-        .replace(/[^a-zA-Z0-9_ .-]/g, '')
-        .trim()
-        .slice(0, 24);
-      setUsernameInput((prev) => prev || suggested);
-      setError(null);
-    }
-  }, [showAuthModal, user]);
-
-  useEffect(() => {
-    if (!showAuthModal || !user || user.username) return;
-    const trimmed = usernameInput.trim();
-    if (!trimmed) {
-      setUsernameStatus(null);
-      return;
-    }
-    let cancelled = false;
-    setCheckingUsername(true);
-    const timer = window.setTimeout(() => {
-      api
-        .checkUsernameAvailable(trimmed)
-        .then((res) => {
-          if (!cancelled) {
-            setUsernameStatus({ available: res.available, reason: res.reason });
-          }
-        })
-        .catch(() => {
-          if (!cancelled) setUsernameStatus(null);
-        })
-        .finally(() => {
-          if (!cancelled) setCheckingUsername(false);
-        });
-    }, 250);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [showAuthModal, user, usernameInput]);
 
   useEffect(() => {
     if (!showAuthModal || user || !googleClientId) return;
@@ -121,6 +65,7 @@ export function AuthModal() {
       if (window.google?.accounts?.id && googleBtnRef.current) {
         window.google.accounts.id.initialize({
           client_id: googleClientId,
+          auto_select: true,
           callback: async (resp) => {
             if (!resp.credential) return;
             setLoading(true);
@@ -136,7 +81,7 @@ export function AuthModal() {
         });
         googleBtnRef.current.innerHTML = '';
         window.google.accounts.id.renderButton(googleBtnRef.current, {
-          theme: 'outline',
+          theme: theme === 'dark' ? 'filled_black' : 'outline',
           size: 'large',
           shape: 'rectangular',
           text: 'continue_with',
@@ -165,16 +110,14 @@ export function AuthModal() {
     script.defer = true;
     script.onload = initGsi;
     document.head.appendChild(script);
-  }, [googleClientId, showAuthModal, signInGoogle, user]);
+  }, [googleClientId, showAuthModal, signInGoogle, theme, user]);
 
-  if (!showAuthModal) return null;
+  if (!showAuthModal || user) return null;
 
-  const handleGoogleFallbackClick = () => {
+  const handleGoogleClick = () => {
     setError(null);
     if (!googleClientId) {
-      setError(
-        'Google OAuth is not configured yet. Add GOOGLE_CLIENT_ID in AI Studio Settings > Secrets to enable live Google Sign-In.'
-      );
+      setError('Google Sign-In is currently being configured. Please try again shortly.');
       return;
     }
     if (window.google?.accounts?.oauth2) {
@@ -184,7 +127,6 @@ export function AuthModal() {
         scope: 'openid profile email',
         callback: async (resp) => {
           if (resp.error || !resp.access_token) {
-            setError('Google Sign-In was canceled or unavailable.');
             setLoading(false);
             return;
           }
@@ -201,148 +143,20 @@ export function AuthModal() {
     } else if (window.google?.accounts?.id) {
       window.google.accounts.id.prompt();
     } else {
-      setError('Google Sign-In script is still loading. Please try again.');
+      setError('Google Sign-In is still loading. Please try again.');
     }
   };
 
-  const handleSaveUsername = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmed = usernameInput.trim();
-    if (!trimmed) {
-      setError('Please enter your preferred username.');
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      await updateProfile({ username: trimmed });
-      setShowAuthModal(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save username.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Step 2: User is signed in with Google and setting their unique username
-  if (user) {
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-        <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl p-6 animate-fadeIn">
-          <div className="flex items-start justify-between gap-4 mb-5">
-            <div>
-              <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-indigo-500 dark:text-sky-400" />
-                <span>Choose Your Username</span>
-              </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                Personalize your greeting and unique identity across MindMaster AI.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowAuthModal(false)}
-              className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
-              aria-label="Close modal"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-
-          <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 mb-5">
-            {user.avatarUrl ? (
-              <img
-                src={user.avatarUrl}
-                alt={user.name}
-                referrerPolicy="no-referrer"
-                className="w-10 h-10 rounded-full object-cover shrink-0"
-              />
-            ) : (
-              <div className="w-10 h-10 rounded-full bg-indigo-600 text-white flex items-center justify-center font-bold shrink-0">
-                {user.name.slice(0, 1).toUpperCase()}
-              </div>
-            )}
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">
-                {user.name}
-              </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                {user.email}
-              </p>
-            </div>
-          </div>
-
-          <form onSubmit={handleSaveUsername} className="space-y-4">
-            <div>
-              <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5">
-                Preferred Username
-              </label>
-              <div className="relative">
-                <AtSign className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  required
-                  minLength={2}
-                  maxLength={24}
-                  value={usernameInput}
-                  onChange={(e) => setUsernameInput(e.target.value)}
-                  placeholder="e.g. Lasin"
-                  autoFocus
-                  className="w-full pl-9 pr-9 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
-                />
-                {checkingUsername ? (
-                  <Loader2 className="w-4 h-4 animate-spin text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
-                ) : usernameStatus?.available ? (
-                  <Check className="w-4 h-4 text-emerald-500 absolute right-3 top-1/2 -translate-y-1/2" />
-                ) : null}
-              </div>
-
-              {usernameStatus && !checkingUsername && (
-                <p
-                  className={`text-xs mt-1.5 ${
-                    usernameStatus.available
-                      ? 'text-emerald-600 dark:text-emerald-400'
-                      : 'text-red-600 dark:text-red-400'
-                  }`}
-                >
-                  {usernameStatus.available
-                    ? `"${usernameInput.trim()}" is available.`
-                    : usernameStatus.reason}
-                </p>
-              )}
-            </div>
-
-            {error && (
-              <p className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/30 rounded-lg px-3 py-2">
-                {error}
-              </p>
-            )}
-
-            <button
-              type="submit"
-              disabled={loading || (usernameStatus !== null && !usernameStatus.available)}
-              className="w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white text-sm font-semibold transition-colors flex items-center justify-center gap-2 cursor-pointer"
-            >
-              {loading && <Loader2 className="w-4 h-4 animate-spin" />}
-              <span>Save Username</span>
-            </button>
-          </form>
-        </div>
-      </div>
-    );
-  }
-
-  // Step 1: Google Sign-In Only
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
       <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl p-6 animate-fadeIn">
         <div className="flex items-start justify-between gap-4 mb-5">
           <div>
             <h2 className="text-lg font-bold text-slate-900 dark:text-white">
-              Welcome to MindMaster AI
+              Sign in to MindMaster AI
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              Sign in or register instantly with your Google account to sync chats, custom usernames, and daily image credits.
+              Continue directly with your Google account.
             </p>
           </div>
           <button
@@ -363,7 +177,7 @@ export function AuthModal() {
           {(!googleClientId || !gsiReady) && (
             <button
               type="button"
-              onClick={handleGoogleFallbackClick}
+              onClick={handleGoogleClick}
               disabled={loading}
               className="w-full py-3 px-4 rounded-xl bg-white dark:bg-slate-950 hover:bg-slate-50 dark:hover:bg-slate-800/80 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-sm font-semibold transition-colors flex items-center justify-center gap-3 shadow-xs cursor-pointer disabled:opacity-60"
             >
@@ -377,10 +191,6 @@ export function AuthModal() {
               {error}
             </p>
           )}
-
-          <p className="text-[11px] text-center text-slate-400 dark:text-slate-500 leading-relaxed">
-            Anyone with a Google account can sign in immediately. Your Google profile name, email, and avatar are retrieved automatically.
-          </p>
         </div>
       </div>
     </div>
