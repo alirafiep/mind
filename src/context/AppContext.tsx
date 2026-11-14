@@ -65,11 +65,11 @@ interface AppContextValue {
   googleClientId: string | null;
   stripeEnabled: boolean;
   customInstructions: CustomInstructions;
-  signInAccount: (email: string, name: string) => Promise<void>;
   signInGoogle: (payload: { idToken?: string; accessToken?: string }) => Promise<void>;
   signOut: () => void;
   updateProfile: (updates: {
     name?: string;
+    username?: string;
     preferredLanguage?: LanguagePreference;
     theme?: Theme;
     customInstructions?: CustomInstructions;
@@ -314,7 +314,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setStoredToken(res.token);
       setUser(res.user);
       setSubscription(res.subscription);
-      setShowAuthModal(false);
+      // Keep AuthModal open for Step 2 (preferred unique username) if user has not set one yet
+      setShowAuthModal(!res.user.username);
 
       // Sync any guest chats created before signing in
       try {
@@ -341,17 +342,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
 
       await loadAccountData();
-      notify(`Signed in as ${res.user.name}`, 'success');
+      notify(`Welcome, ${res.user.username || res.user.name}!`, 'success');
     },
     [loadAccountData, notify]
-  );
-
-  const signInAccount = useCallback(
-    async (email: string, name: string) => {
-      const res = await api.signInAccount(email, name);
-      await handleSessionSuccess(res);
-    },
-    [handleSessionSuccess]
   );
 
   const signInGoogle = useCallback(
@@ -372,23 +365,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setFolders([]);
     setLibraryItems([]);
     loadGuestState();
-    notify('Signed out. Sign back in anytime to access your saved library and chats.', 'info');
+    notify('Signed out. Sign back in anytime with your Google account.', 'info');
   }, [loadGuestState, notify]);
 
   const updateProfile = useCallback(
     async (updates: {
       name?: string;
+      username?: string;
       preferredLanguage?: LanguagePreference;
       theme?: Theme;
       customInstructions?: CustomInstructions;
     }) => {
       if (!user) {
         setShowAuthModal(true);
-        throw new Error('Please sign in to save profile preferences.');
+        throw new Error('Please sign in with Google to save profile settings.');
       }
       const res = await api.updateProfile(updates);
       setUser(res.user);
-      notify('Settings saved to your account.', 'success');
+      notify('Profile settings saved.', 'success');
     },
     [notify, user]
   );
@@ -692,7 +686,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         googleClientId,
         stripeEnabled,
         customInstructions,
-        signInAccount,
         signInGoogle,
         signOut,
         updateProfile,

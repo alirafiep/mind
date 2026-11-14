@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Crown, LogOut, Moon, Sliders, Sun, User as UserIcon } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { AtSign, Check, Crown, Loader2, LogOut, Moon, Sliders, Sun, User as UserIcon } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { api } from '../services/api';
 
@@ -20,7 +20,46 @@ export function ProfileView() {
   } = useApp();
 
   const [displayName, setDisplayName] = useState(user?.name || '');
+  const [username, setUsername] = useState(user?.username || '');
+  const [checkingUsername, setCheckingUsername] = useState(false);
+  const [usernameStatus, setUsernameStatus] = useState<{
+    available: boolean;
+    reason?: string;
+  } | null>(null);
+  const [profileError, setProfileError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setDisplayName(user?.name || '');
+    setUsername(user?.username || '');
+  }, [user?.name, user?.username]);
+
+  useEffect(() => {
+    const trimmed = username.trim();
+    if (!user || !trimmed || trimmed.toLowerCase() === (user.username || '').toLowerCase()) {
+      setUsernameStatus(null);
+      return;
+    }
+    let cancelled = false;
+    setCheckingUsername(true);
+    const timer = window.setTimeout(() => {
+      api
+        .checkUsernameAvailable(trimmed)
+        .then((res) => {
+          if (!cancelled) setUsernameStatus({ available: res.available, reason: res.reason });
+        })
+        .catch(() => {
+          if (!cancelled) setUsernameStatus(null);
+        })
+        .finally(() => {
+          if (!cancelled) setCheckingUsername(false);
+        });
+    }, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [user, username]);
 
   if (!user) {
     return (
@@ -30,29 +69,38 @@ export function ProfileView() {
             <UserIcon className="w-6 h-6" />
           </div>
           <h2 className="text-lg font-bold text-slate-900 dark:text-white">
-            Sign in to view your Profile
+            Sign in with Google
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Save your chat history, custom instructions, personal library, and PRO subscription to your account.
+            Connect your Google account to choose your unique username and sync your chat history, custom instructions, and library.
           </p>
           <button
             type="button"
             onClick={() => setShowAuthModal(true)}
             className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold cursor-pointer"
           >
-            Sign In / Connect Account
+            Continue with Google
           </button>
         </div>
       </div>
     );
   }
 
-  const handleSaveName = async (e: React.FormEvent) => {
+  const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!displayName.trim()) return;
+    setProfileError(null);
+    const trimmedName = displayName.trim();
+    const trimmedUsername = username.trim();
+    if (!trimmedName && !trimmedUsername) return;
+
     setSaving(true);
     try {
-      await updateProfile({ name: displayName.trim() });
+      await updateProfile({
+        name: trimmedName || undefined,
+        username: trimmedUsername || undefined,
+      });
+    } catch (err) {
+      setProfileError(err instanceof Error ? err.message : 'Unable to save profile.');
     } finally {
       setSaving(false);
     }
@@ -91,25 +139,73 @@ export function ProfileView() {
               </div>
             )}
             <div>
-              <h2 className="text-base font-bold text-slate-900 dark:text-white">{user.name}</h2>
+              <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                {user.username ? `${user.username} (${user.name})` : user.name}
+              </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">{user.email}</p>
             </div>
           </div>
 
-          <form onSubmit={handleSaveName} className="flex flex-col sm:flex-row gap-2">
-            <input
-              type="text"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              className="flex-1 px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm text-slate-900 dark:text-white"
-              placeholder="Display name"
-            />
+          <form onSubmit={handleSaveProfile} className="space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">
+                  Unique Username
+                </label>
+                <div className="relative">
+                  <AtSign className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    minLength={2}
+                    maxLength={24}
+                    className="w-full pl-8 pr-8 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm text-slate-900 dark:text-white"
+                    placeholder="Choose unique username"
+                  />
+                  {checkingUsername ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
+                  ) : usernameStatus?.available ? (
+                    <Check className="w-3.5 h-3.5 text-emerald-500 absolute right-3 top-1/2 -translate-y-1/2" />
+                  ) : null}
+                </div>
+                {usernameStatus && !checkingUsername && (
+                  <p
+                    className={`text-[11px] mt-1 ${
+                      usernameStatus.available
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : 'text-red-600 dark:text-red-400'
+                    }`}
+                  >
+                    {usernameStatus.available ? 'Username available' : usernameStatus.reason}
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">
+                  Display Name
+                </label>
+                <input
+                  type="text"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm text-slate-900 dark:text-white"
+                  placeholder="Display name"
+                />
+              </div>
+            </div>
+
+            {profileError && (
+              <p className="text-xs text-red-600 dark:text-red-400">{profileError}</p>
+            )}
+
             <button
               type="submit"
-              disabled={saving}
-              className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold cursor-pointer"
+              disabled={saving || (usernameStatus !== null && !usernameStatus.available)}
+              className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold cursor-pointer"
             >
-              Update Name
+              {saving ? 'Saving...' : 'Save Profile'}
             </button>
           </form>
         </div>

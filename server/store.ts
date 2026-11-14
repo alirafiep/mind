@@ -123,6 +123,33 @@ async function persistDb(): Promise<void> {
   return writeChain;
 }
 
+export function validateUsername(raw: string): { valid: boolean; normalized: string; error?: string } {
+  const cleaned = raw.trim().replace(/^@+/, '').replace(/\s+/g, ' ');
+  if (cleaned.length < 2 || cleaned.length > 24) {
+    return { valid: false, normalized: cleaned, error: 'Username must be between 2 and 24 characters.' };
+  }
+  if (cleaned.includes('@') || !/^[a-zA-Z0-9](?:[a-zA-Z0-9_ .-]{0,22}[a-zA-Z0-9])?$/.test(cleaned)) {
+    return {
+      valid: false,
+      normalized: cleaned,
+      error: 'Use only letters, numbers, spaces, underscores, dots, or hyphens.',
+    };
+  }
+  return { valid: true, normalized: cleaned };
+}
+
+export function isUsernameAvailable(username: string, excludeUserId?: string): boolean {
+  const target = username.trim().toLowerCase();
+  if (!target) return false;
+  for (const user of Object.values(dbState.users)) {
+    if (excludeUserId && user.id === excludeUserId) continue;
+    if (user.username && user.username.trim().toLowerCase() === target) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export function getOrCreateUser(params: {
   email: string;
   name: string;
@@ -131,10 +158,14 @@ export function getOrCreateUser(params: {
 }): UserProfile {
   const normalizedEmail = params.email.trim().toLowerCase();
   const userId = 'usr_' + crypto.createHash('sha256').update(normalizedEmail).digest('hex').slice(0, 20);
+  const safeName =
+    params.name.trim() && !params.name.includes('@') ? params.name.trim() : 'Google User';
 
   const existing = dbState.users[userId];
   if (existing) {
-    existing.name = params.name.trim() || existing.name;
+    if (safeName !== 'Google User' || !existing.name) {
+      existing.name = safeName;
+    }
     if (params.avatarUrl) existing.avatarUrl = params.avatarUrl;
     if (params.authProvider === 'google') existing.authProvider = 'google';
     void persistDb();
@@ -144,7 +175,7 @@ export function getOrCreateUser(params: {
   const created: UserProfile = {
     id: userId,
     email: normalizedEmail,
-    name: params.name.trim() || normalizedEmail.split('@')[0] || 'User',
+    name: safeName,
     avatarUrl: params.avatarUrl,
     authProvider: params.authProvider,
     customInstructions: { ...DEFAULT_INSTRUCTIONS },
@@ -193,16 +224,35 @@ export async function updateUserProfile(
   userId: string,
   updates: {
     name?: string;
+    username?: string;
     preferredLanguage?: LanguagePreference;
     theme?: Theme;
     customInstructions?: CustomInstructions;
   }
-): Promise<UserProfile | null> {
+): Promise<{ user: UserProfile | null; error?: string; code?: 'USERNAME_INVALID' | 'USERNAME_TAKEN' }> {
   const user = dbState.users[userId];
-  if (!user) return null;
+  if (!user) return { user: null };
+
+  if (typeof updates.username === 'string') {
+    const check = validateUsername(updates.username);
+    if (!check.valid) {
+      return { user: null, error: check.error, code: 'USERNAME_INVALID' };
+    }
+    if (!isUsernameAvailable(check.normalized, userId)) {
+      return {
+        user: null,
+        error: 'That username is already taken. Please choose another one.',
+        code: 'USERNAME_TAKEN',
+      };
+    }
+    user.username = check.normalized;
+  }
 
   if (typeof updates.name === 'string' && updates.name.trim()) {
-    user.name = updates.name.trim().slice(0, 80);
+    const trimmed = updates.name.trim().slice(0, 80);
+    if (!trimmed.includes('@')) {
+      user.name = trimmed;
+    }
   }
   if (updates.preferredLanguage) {
     user.preferredLanguage = updates.preferredLanguage;
@@ -219,7 +269,7 @@ export async function updateUserProfile(
   }
 
   await persistDb();
-  return user;
+  return { user };
 }
 
 function ensureSubscriptionRecord(userId: string): ServerSubscriptionRecord {

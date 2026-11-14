@@ -87,20 +87,20 @@ export const api = {
       subscription: SubscriptionInfo | null;
     }>('/api/auth/me'),
 
-  signInAccount: (email: string, name: string) =>
-    apiFetch<AuthSessionResponse>('/api/auth/signin', {
-      method: 'POST',
-      body: JSON.stringify({ email, name }),
-    }),
-
   signInGoogle: (payload: { idToken?: string; accessToken?: string }) =>
     apiFetch<AuthSessionResponse>('/api/auth/google', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
 
+  checkUsernameAvailable: (username: string) =>
+    apiFetch<{ available: boolean; normalized?: string; reason?: string }>(
+      `/api/auth/username-available?username=${encodeURIComponent(username)}`
+    ),
+
   updateProfile: (updates: {
     name?: string;
+    username?: string;
     preferredLanguage?: LanguagePreference;
     theme?: Theme;
     customInstructions?: CustomInstructions;

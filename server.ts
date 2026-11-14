@@ -25,12 +25,14 @@ import {
   incrementImageUsage,
   incrementVideoUsage,
   isUserProActive,
+  isUsernameAvailable,
   renameUserFolder,
   resolveMediaFilePath,
   saveMediaBuffer,
   updateUserLibraryItem,
   updateUserProfile,
   upsertUserChat,
+  validateUsername,
 } from './server/store.ts';
 import {
   extractAuthUser,
@@ -140,7 +142,8 @@ app.get('/api/health', (_req: Request, res: Response) => {
 
 app.get('/api/auth/config', (_req: Request, res: Response) => {
   res.json({
-    googleClientId: process.env.GOOGLE_CLIENT_ID || null,
+    googleClientId:
+      process.env.GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID || null,
     stripeEnabled: Boolean(process.env.STRIPE_SECRET_KEY),
     hasApiKey: hasValidApiKey(),
   });
@@ -169,23 +172,26 @@ app.post('/api/auth/google', async (req: Request, res: Response) => {
   return res.json({ token, user, subscription });
 });
 
-app.post('/api/auth/signin', (req: Request, res: Response) => {
-  const { email, name } = req.body as { email?: string; name?: string };
-  const cleanEmail = (email || '').trim().toLowerCase();
-  if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-    return res.status(400).json({ error: 'Please enter a valid email address.' });
-  }
-
-  const cleanName = (name || '').trim() || cleanEmail.split('@')[0];
-  const user = getOrCreateUser({
-    email: cleanEmail,
-    name: cleanName,
-    authProvider: 'account',
+app.post('/api/auth/signin', (_req: Request, res: Response) => {
+  return res.status(403).json({
+    error: 'Google Sign-In is the only authentication method supported.',
+    code: 'GOOGLE_SIGNIN_ONLY',
   });
-  const token = signSessionToken(user.id, user.email);
-  const subscription = getSubscriptionInfo(user.id);
+});
 
-  return res.json({ token, user, subscription });
+app.get('/api/auth/username-available', (req: Request, res: Response) => {
+  const raw = typeof req.query.username === 'string' ? req.query.username : '';
+  const check = validateUsername(raw);
+  if (!check.valid) {
+    return res.json({ available: false, reason: check.error });
+  }
+  const session = extractAuthUser(req);
+  const available = isUsernameAvailable(check.normalized, session?.uid);
+  return res.json({
+    available,
+    normalized: check.normalized,
+    reason: available ? undefined : 'That username is already taken.',
+  });
 });
 
 app.get('/api/auth/me', (req: Request, res: Response) => {
@@ -206,22 +212,30 @@ app.patch('/api/auth/profile', async (req: Request, res: Response) => {
   if (!session) {
     return res.status(401).json({ error: 'Sign in required to update profile settings.' });
   }
-  const { name, preferredLanguage, theme, customInstructions } = req.body as {
+  const { name, username, preferredLanguage, theme, customInstructions } = req.body as {
     name?: string;
+    username?: string;
     preferredLanguage?: LanguagePreference;
     theme?: 'dark' | 'light';
     customInstructions?: CustomInstructions;
   };
-  const updated = await updateUserProfile(session.uid, {
+  const result = await updateUserProfile(session.uid, {
     name,
+    username,
     preferredLanguage,
     theme,
     customInstructions,
   });
-  if (!updated) {
+  if (result.code === 'USERNAME_TAKEN') {
+    return res.status(409).json({ error: result.error, code: result.code });
+  }
+  if (result.code === 'USERNAME_INVALID') {
+    return res.status(400).json({ error: result.error, code: result.code });
+  }
+  if (!result.user) {
     return res.status(404).json({ error: 'User account not found.' });
   }
-  return res.json({ user: updated });
+  return res.json({ user: result.user });
 });
 
 // ============================================================================

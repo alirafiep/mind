@@ -828,16 +828,27 @@ export function ChatWorkspace() {
                   className="w-16 h-16 mx-auto rounded-2xl object-cover border border-slate-200 dark:border-slate-800 shadow-lg"
                 />
                 {(() => {
-                  const displayName = user ? getSafeDisplayName(user.name) : null;
+                  const displayHandle = user
+                    ? getSafeDisplayName(user.username) || getSafeDisplayName(user.name)
+                    : null;
                   const greeting = getTimeGreeting();
                   return (
                     <>
                       <h1 className="text-2xl sm:text-4xl font-bold tracking-tight text-slate-900 dark:text-white text-balance">
-                        {displayName ? `${greeting}, ${displayName}` : `${greeting}`}
+                        {displayHandle ? `Hi, ${displayHandle}!` : greeting}
                       </h1>
                       <p className="text-base sm:text-lg font-medium text-slate-500 dark:text-slate-400">
                         Where should we start?
                       </p>
+                      {user && !user.username && (
+                        <button
+                          type="button"
+                          onClick={() => setShowAuthModal(true)}
+                          className="text-xs font-medium text-indigo-600 dark:text-sky-400 hover:underline cursor-pointer"
+                        >
+                          Choose your unique username
+                        </button>
+                      )}
                     </>
                   );
                 })()}
