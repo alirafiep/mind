@@ -67,7 +67,6 @@ async function apiFetch<T>(url: string, options: RequestInit = {}): Promise<T> {
 }
 
 export interface AuthConfigResponse {
-  googleClientId: string | null;
   stripeEnabled: boolean;
   hasApiKey: boolean;
 }
@@ -88,8 +87,14 @@ export const api = {
       subscription: SubscriptionInfo | null;
     }>('/api/auth/me'),
 
-  signInGoogle: (payload: { idToken?: string; accessToken?: string }) =>
-    apiFetch<AuthSessionResponse>('/api/auth/google', {
+  signIn: (payload: { email: string; password: string }) =>
+    apiFetch<AuthSessionResponse>('/api/auth/signin', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  signUp: (payload: { email: string; password: string; name?: string }) =>
+    apiFetch<AuthSessionResponse>('/api/auth/signup', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),

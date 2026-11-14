@@ -20,8 +20,6 @@ import type {
 const GUEST_CHATS_KEY = 'mindmaster_guest_chats_v2';
 const GUEST_LIBRARY_KEY = 'mindmaster_guest_library_v2';
 const GUEST_PINNED_PROMPTS_KEY = 'mindmaster_guest_pinned_prompts_v1';
-const EXPLICIT_SIGNOUT_KEY = 'mindmaster_explicit_signout_v1';
-const ONETAP_ATTEMPTED_KEY = 'mindmaster_onetap_attempted_v1';
 const THEME_KEY = 'mindmaster_theme_v2';
 const LANG_KEY = 'mindmaster_lang_v2';
 
@@ -73,10 +71,10 @@ interface AppContextValue {
   user: UserProfile | null;
   isPro: boolean;
   subscription: SubscriptionInfo;
-  googleClientId: string | null;
   stripeEnabled: boolean;
   customInstructions: CustomInstructions;
-  signInGoogle: (payload: { idToken?: string; accessToken?: string }) => Promise<void>;
+  signIn: (payload: { email: string; password: string }) => Promise<void>;
+  signUp: (payload: { email: string; password: string; name?: string }) => Promise<void>;
   signOut: () => void;
   updateProfile: (updates: {
     name?: string;
@@ -197,7 +195,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [authReady, setAuthReady] = useState(false);
   const [user, setUser] = useState<UserProfile | null>(null);
   const [subscription, setSubscription] = useState<SubscriptionInfo>(DEFAULT_SUBSCRIPTION);
-  const [googleClientId, setGoogleClientId] = useState<string | null>(null);
   const [stripeEnabled, setStripeEnabled] = useState(false);
 
   const [chats, setChats] = useState<ChatSession[]>([]);
@@ -306,7 +303,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const refreshAccount = useCallback(async () => {
     try {
       const cfg = await api.getAuthConfig();
-      setGoogleClientId(cfg.googleClientId);
       setStripeEnabled(cfg.stripeEnabled);
 
       const token = getStoredToken();
@@ -361,12 +357,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const handleSessionSuccess = useCallback(
     async (res: { token: string; user: UserProfile; subscription: SubscriptionInfo }) => {
-      try {
-        sessionStorage.removeItem(EXPLICIT_SIGNOUT_KEY);
-        sessionStorage.removeItem(ONETAP_ATTEMPTED_KEY);
-      } catch {
-        // ignore storage errors
-      }
       setStoredToken(res.token);
       setUser(res.user);
       setSubscription(res.subscription);
@@ -419,21 +409,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [loadAccountData]
   );
 
-  const signInGoogle = useCallback(
-    async (payload: { idToken?: string; accessToken?: string }) => {
-      const res = await api.signInGoogle(payload);
+  const signIn = useCallback(
+    async (payload: { email: string; password: string }) => {
+      const res = await api.signIn(payload);
+      await handleSessionSuccess(res);
+    },
+    [handleSessionSuccess]
+  );
+
+  const signUp = useCallback(
+    async (payload: { email: string; password: string; name?: string }) => {
+      const res = await api.signUp(payload);
       await handleSessionSuccess(res);
     },
     [handleSessionSuccess]
   );
 
   const signOut = useCallback(() => {
-    try {
-      sessionStorage.setItem(EXPLICIT_SIGNOUT_KEY, '1');
-      window.google?.accounts?.id?.disableAutoSelect?.();
-    } catch {
-      // ignore storage / GSI errors
-    }
     setStoredToken(null);
     setUser(null);
     setSubscription(DEFAULT_SUBSCRIPTION);
@@ -444,83 +436,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setFolders([]);
     setLibraryItems([]);
     loadGuestState();
-    notify('Signed out. Sign back in anytime with your Google account.', 'info');
+    notify('Signed out. Sign back in anytime with your email and password.', 'info');
   }, [loadGuestState, notify]);
-
-  // Automatic Google Sign-In via Google One Tap & auto_select when app opens
-  useEffect(() => {
-    const effectiveClientId =
-      googleClientId || (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) || null;
-    if (!authReady || user || !effectiveClientId) return;
-
-    try {
-      if (
-        sessionStorage.getItem(EXPLICIT_SIGNOUT_KEY) === '1' ||
-        sessionStorage.getItem(ONETAP_ATTEMPTED_KEY) === '1'
-      ) {
-        return;
-      }
-    } catch {
-      // continue without sessionStorage flags
-    }
-
-    let cancelled = false;
-
-    const triggerOneTap = () => {
-      if (cancelled || !window.google?.accounts?.id) return;
-
-      window.google.accounts.id.initialize({
-        client_id: effectiveClientId,
-        auto_select: true,
-        cancel_on_tap_outside: true,
-        itp_support: true,
-        callback: async (resp: { credential?: string }) => {
-          if (cancelled || !resp.credential) return;
-          try {
-            await signInGoogle({ idToken: resp.credential });
-          } catch {
-            // Silently fall back; user can click Sign In manually if verification fails
-          }
-        },
-      });
-
-      window.google.accounts.id.prompt((notification) => {
-        if (
-          notification.isDismissedMoment?.() ||
-          notification.isSkippedMoment?.() ||
-          notification.isNotDisplayed?.()
-        ) {
-          try {
-            sessionStorage.setItem(ONETAP_ATTEMPTED_KEY, '1');
-          } catch {
-            // ignore
-          }
-        }
-      });
-    };
-
-    if (window.google?.accounts?.id) {
-      triggerOneTap();
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    const script = document.querySelector<HTMLScriptElement>(
-      'script[src="https://accounts.google.com/gsi/client"]'
-    );
-    if (script) {
-      script.addEventListener('load', triggerOneTap);
-      return () => {
-        cancelled = true;
-        script.removeEventListener('load', triggerOneTap);
-      };
-    }
-
-    return () => {
-      cancelled = true;
-    };
-  }, [authReady, googleClientId, signInGoogle, user]);
 
   const updateProfile = useCallback(
     async (updates: {
@@ -532,7 +449,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }) => {
       if (!user) {
         setShowAuthModal(true);
-        throw new Error('Please sign in with Google to save profile settings.');
+        throw new Error('Please sign in to save profile settings.');
       }
       const res = await api.updateProfile(updates);
       setUser(res.user);
@@ -692,7 +609,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         persistGuestPinnedPrompts(next);
         return next;
       });
-      notify('Prompt pinned locally. Sign in with Google to sync across sessions.', 'success');
+      notify('Prompt pinned locally. Sign in to sync across sessions.', 'success');
       return localPin;
     },
     [notify, pinnedPrompts, user]
@@ -1019,10 +936,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         user,
         isPro,
         subscription,
-        googleClientId,
         stripeEnabled,
         customInstructions,
-        signInGoogle,
+        signIn,
+        signUp,
         signOut,
         updateProfile,
         setSubscription,

@@ -69,17 +69,17 @@ export function ProfileView() {
             <UserIcon className="w-6 h-6" />
           </div>
           <h2 className="text-lg font-bold text-slate-900 dark:text-white">
-            Sign in with Google
+            Sign in to your account
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Connect your Google account to choose your unique username and sync your chat history, custom instructions, and library.
+            Sign in or create an account with your email and password to choose your unique username and sync your chat history, custom instructions, and library.
           </p>
           <button
             type="button"
             onClick={() => setShowAuthModal(true)}
             className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold cursor-pointer"
           >
-            Continue with Google
+            Sign In / Create Account
           </button>
         </div>
       </div>

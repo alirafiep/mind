@@ -8,6 +8,7 @@ import sharp from 'sharp';
 import {
   activateProSubscription,
   addUserLibraryItem,
+  authenticateAccountUser,
   cancelProSubscription,
   createPinnedPrompt,
   createShareSnapshot,
@@ -17,7 +18,6 @@ import {
   deleteUserFolder,
   deleteUserLibraryItem,
   getGuestSubscriptionInfo,
-  getOrCreateUser,
   getShareSnapshot,
   getSubscriptionInfo,
   getUserById,
@@ -29,6 +29,7 @@ import {
   incrementVideoUsage,
   isUserProActive,
   isUsernameAvailable,
+  registerAccountUser,
   renameUserFolder,
   resolveMediaFilePath,
   saveMediaBuffer,
@@ -41,7 +42,6 @@ import {
 import {
   extractAuthUser,
   signSessionToken,
-  verifyGoogleCredential,
 } from './server/auth.ts';
 import type {
   AspectRatioOption,
@@ -179,41 +179,61 @@ app.get('/api/health', (_req: Request, res: Response) => {
 
 app.get('/api/auth/config', (_req: Request, res: Response) => {
   res.json({
-    googleClientId:
-      process.env.GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID || null,
     stripeEnabled: Boolean(process.env.STRIPE_SECRET_KEY),
     hasApiKey: hasValidApiKey(),
   });
 });
 
-app.post('/api/auth/google', async (req: Request, res: Response) => {
-  const { idToken, accessToken } = req.body as { idToken?: string; accessToken?: string };
-  if (!idToken && !accessToken) {
-    return res.status(400).json({ error: 'Missing Google credential token.' });
-  }
-
-  const googleUser = await verifyGoogleCredential({ idToken, accessToken });
-  if (!googleUser) {
-    return res.status(401).json({ error: 'Could not verify Google account credential.' });
-  }
-
-  const user = getOrCreateUser({
-    email: googleUser.email,
-    name: googleUser.name,
-    avatarUrl: googleUser.avatarUrl,
-    authProvider: 'google',
+app.post('/api/auth/signup', async (req: Request, res: Response) => {
+  const { email, password, name } = req.body as {
+    email?: string;
+    password?: string;
+    name?: string;
+  };
+  const result = await registerAccountUser({
+    email: email || '',
+    password: password || '',
+    name,
   });
-  const token = signSessionToken(user.id, user.email);
-  const subscription = getSubscriptionInfo(user.id);
-
-  return res.json({ token, user, subscription });
+  if (!result.user) {
+    return res.status(result.status || 400).json({ error: result.error || 'Unable to create account.' });
+  }
+  const token = signSessionToken(result.user.id, result.user.email);
+  const subscription = getSubscriptionInfo(result.user.id);
+  return res.status(201).json({ token, user: result.user, subscription });
 });
 
-app.post('/api/auth/signin', (_req: Request, res: Response) => {
-  return res.status(403).json({
-    error: 'Google Sign-In is the only authentication method supported.',
-    code: 'GOOGLE_SIGNIN_ONLY',
+app.post('/api/auth/signin', async (req: Request, res: Response) => {
+  const { email, password, name, mode } = req.body as {
+    email?: string;
+    password?: string;
+    name?: string;
+    mode?: 'signin' | 'signup';
+  };
+  if (mode === 'signup') {
+    const result = await registerAccountUser({
+      email: email || '',
+      password: password || '',
+      name,
+    });
+    if (!result.user) {
+      return res.status(result.status || 400).json({ error: result.error || 'Unable to create account.' });
+    }
+    const token = signSessionToken(result.user.id, result.user.email);
+    const subscription = getSubscriptionInfo(result.user.id);
+    return res.status(201).json({ token, user: result.user, subscription });
+  }
+
+  const result = authenticateAccountUser({
+    email: email || '',
+    password: password || '',
   });
+  if (!result.user) {
+    return res.status(result.status || 401).json({ error: result.error || 'Invalid email or password.' });
+  }
+  const token = signSessionToken(result.user.id, result.user.email);
+  const subscription = getSubscriptionInfo(result.user.id);
+  return res.json({ token, user: result.user, subscription });
 });
 
 app.get('/api/auth/username-available', (req: Request, res: Response) => {
@@ -383,21 +403,28 @@ function buildChatSystemInstruction(
     turnLanguageOverride = `\n\nMANDATORY OUTPUT LANGUAGE FOR THIS RESPONSE: Reply in clear, accurate English (unless the user explicitly wrote Manglish—if any Manglish is present, always reply in proper Malayalam script).`;
   }
 
-  let instruction = `You are MindMaster AI, an intelligent, thoughtful, and highly capable AI assistant.
+  const todayIso = new Date().toISOString().slice(0, 10);
+
+  let instruction = `You are MindMaster AI, an advanced Web Research Assistant and intelligent multilingual AI companion. Today's date is ${todayIso}.
 
 ${languageDirectives[language] || languageDirectives.auto}${turnLanguageOverride}
 
-INTELLIGENT BEHAVIOUR & INSTANT RESPONSIVENESS:
+CORE WEB RESEARCH & ACCURACY RULES:
 - Answer questions across any subject or domain freely—never restrict users to predefined topics.
-- Provide complete, accurate, helpful answers immediately. Do NOT ask unnecessary confirmation questions, permission prompts, or filler follow-up questions.
-- Maintain complete context from all previous messages in the conversation and answer follow-up questions directly without asking the user to repeat prior details.
-- Structure answers cleanly using Markdown (headings, bullet lists, numbered steps, tables, and fenced code blocks with language tags like \`\`\`ts or \`\`\`python when appropriate).
-- If you are uncertain about a fact, recent event, or obscure detail, explicitly state your uncertainty instead of inventing facts or fabricating citations.
+- Provide complete, accurate, clear, and detailed answers immediately without unnecessary confirmation prompts or filler follow-up questions.
+- Explain complex concepts in simple, everyday language that is easy to understand, structured cleanly with Markdown (headings, bullet points, comparison tables, and code blocks when helpful).
+- Maintain complete context from all previous messages in the conversation so follow-up questions work naturally.
+- Never invent, guess, or fabricate facts, statistics, quotes, URLs, links, or sources.
+- If verified information cannot be found or is unavailable online, explicitly and honestly tell the user what could not be verified.
 - When analyzing uploaded images or documents, inspect every detail carefully and reference what you observe.`;
 
   if (webSearch) {
-    instruction += `\n\nWEB SEARCH ENABLED:
-- Ground your response in live web search results when answering current events, recent facts, statistics, or lookups. Cite key facts clearly.`;
+    instruction += `\n\nMANDATORY WEB RESEARCH WORKFLOW (LIVE INTERNET SEARCH ENABLED):
+- ALWAYS search the internet using the web search tool BEFORE answering every question—never rely solely on internal memory or assumptions.
+- Verify important facts, figures, dates, and claims across multiple reliable, authoritative, and up-to-date websites whenever possible.
+- For current events, pricing, software versions, news, or changing topics, always prioritize the latest available information as of ${todayIso}.
+- Include clickable Markdown source links (e.g., [Source Name](https://...)) using ONLY the exact verified URLs returned by your web search results—never fabricate or guess a link.
+- If live search returns no reliable information on the question, clearly inform the user that verified information is unavailable online.`;
   }
 
   if (customInstructions?.enabled) {
@@ -416,7 +443,7 @@ app.post('/api/chat/stream', async (req: Request, res: Response) => {
   const {
     messages = [],
     attachments = [],
-    webSearch = false,
+    webSearch = true,
     language = 'auto',
     customInstructions,
   } = req.body as {
@@ -537,8 +564,14 @@ app.post('/api/chat/stream', async (req: Request, res: Response) => {
           const uri = gc.web?.uri;
           if (uri && !seenUrls.has(uri)) {
             seenUrls.add(uri);
+            let fallbackTitle = 'Web Source';
+            try {
+              fallbackTitle = new URL(uri).hostname;
+            } catch {
+              // ignore invalid URL formatting
+            }
             collectedSources.push({
-              title: gc.web?.title || new URL(uri).hostname,
+              title: gc.web?.title || fallbackTitle,
               url: uri,
             });
           }

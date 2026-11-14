@@ -602,7 +602,7 @@ export function Sidebar({ mobileOpen, onCloseMobile }: SidebarProps) {
             className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
           >
             <LogIn className="w-3.5 h-3.5" />
-            <span>Sign in with Google</span>
+            <span>Sign In</span>
           </button>
         )}
       </div>

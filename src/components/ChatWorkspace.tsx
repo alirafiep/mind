@@ -121,7 +121,7 @@ export function ChatWorkspace() {
 
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<ChatAttachmentPayload[]>([]);
-  const [webSearch, setWebSearch] = useState(false);
+  const [webSearch, setWebSearch] = useState(true);
   const [isStreaming, setIsStreaming] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [speakingId, setSpeakingId] = useState<string | null>(null);
@@ -324,7 +324,7 @@ export function ChatWorkspace() {
     if ((!text && attachments.length === 0) || isStreaming || isGeneratingInlineImage) return;
 
     const effectiveWebSearch = forceWebSearch !== undefined ? forceWebSearch : webSearch;
-    if (attachments.length === 0 && !effectiveWebSearch) {
+    if (attachments.length === 0 && forceWebSearch !== true) {
       const detectedImage = detectImageIntentAndSize(
         text,
         imageSizePreset,
@@ -868,7 +868,7 @@ export function ChatWorkspace() {
                   <button
                     key={item.title}
                     type="button"
-                    onClick={() => void handleSend(item.prompt, Boolean(item.webSearch))}
+                    onClick={() => void handleSend(item.prompt, item.webSearch ?? webSearch)}
                     className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-indigo-400 dark:hover:border-sky-500/60 transition-colors text-left cursor-pointer"
                   >
                     <p className="text-xs font-semibold text-indigo-600 dark:text-sky-400 mb-1">
@@ -1060,7 +1060,7 @@ export function ChatWorkspace() {
                         ) : (
                           <div className="flex items-center gap-2 text-sm text-slate-400">
                             <Loader2 className="w-4 h-4 animate-spin" />
-                            <span>Thinking...</span>
+                            <span>{webSearch ? 'Searching the web & researching...' : 'Thinking...'}</span>
                           </div>
                         )}
 
@@ -1486,7 +1486,7 @@ export function ChatWorkspace() {
                 <button
                   type="button"
                   onClick={() => setWebSearch((v) => !v)}
-                  title="Enable live Google Web Search grounding"
+                  title="Live Web Research (searches the internet & verifies sources before answering)"
                   className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
                     webSearch
                       ? 'bg-indigo-50 dark:bg-sky-500/15 text-indigo-700 dark:text-sky-300 border border-indigo-200 dark:border-sky-500/30'
