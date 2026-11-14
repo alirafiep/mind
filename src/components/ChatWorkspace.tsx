@@ -53,7 +53,7 @@ const LANGUAGE_OPTIONS: Array<{ value: LanguagePreference; label: string }> = [
   { value: 'auto', label: 'Auto-Detect Language' },
   { value: 'en', label: 'English' },
   { value: 'ml', label: 'മലയാളം (Malayalam)' },
-  { value: 'manglish', label: 'Manglish' },
+  { value: 'manglish', label: 'Manglish → മലയാളം' },
   { value: 'ar', label: 'العربية (Arabic)' },
   { value: 'hi', label: 'हिन्दी (Hindi)' },
   { value: 'es', label: 'Español (Spanish)' },
@@ -337,7 +337,7 @@ export function ChatWorkspace() {
         }
         await handleInlineGenerateImage({
           prompt: detectedImage.prompt,
-          style: imageStyle,
+          style: detectedImage.detectedStyle || imageStyle,
           sizePreset: detectedImage.sizePreset,
           customWidth: detectedImage.customWidth,
           customHeight: detectedImage.customHeight,
@@ -449,7 +449,9 @@ export function ChatWorkspace() {
             m.id === overrideParams.replaceAssistantMsgId
               ? {
                   ...m,
-                  content: `Regenerated image for **"${prompt}"** (${imgRes.sizeLabel} · ${imgRes.targetWidth}×${imgRes.targetHeight} px).`,
+                  content:
+                    imgRes.assistantMessage ||
+                    `Regenerated image for **"${prompt}"** (${imgRes.sizeLabel} · ${imgRes.targetWidth}×${imgRes.targetHeight} px).`,
                   generatedImageUrl: imgRes.mediaUrl,
                   generatedImage: generatedMeta,
                   isError: false,
@@ -533,7 +535,7 @@ export function ChatWorkspace() {
         m.id === assistantPlaceholderId
           ? {
               ...m,
-              content: `Generated image for **"${prompt}"**.`,
+              content: imgRes.assistantMessage || `Generated image for **"${prompt}"**.`,
               generatedImageUrl: imgRes.mediaUrl,
               generatedImage: generatedMeta,
               timestamp: Date.now(),

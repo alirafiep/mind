@@ -297,9 +297,10 @@ export const api = {
       mediaUrl: string;
       mimeType: string;
       prompt: string;
+      assistantMessage?: string;
       style: ImageStyle;
       sizePreset: ImageSizePreset;
-      sizeLabel: string;
+      sizeLabel: ImageSizePreset extends string ? string : never;
       aspectRatio: GeminiAspectRatio;
       targetWidth: number;
       targetHeight: number;

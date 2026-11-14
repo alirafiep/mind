@@ -140,11 +140,12 @@ export const IMAGE_STYLE_OPTIONS: Array<{ id: ImageStyle; label: string; desc: s
   { id: '3d', label: '3D Art', desc: 'Clean 3D render & studio lighting' },
   { id: 'cartoon', label: 'Cartoon', desc: 'Vibrant stylized cartoon illustration' },
   { id: 'anime', label: 'Anime', desc: 'Expressive studio anime artwork' },
+  { id: 'digital_art', label: 'Digital Art', desc: 'Rich concept & digital painting artwork' },
+  { id: 'cinematic', label: 'Cinematic', desc: 'Dramatic film lighting & color grade' },
   { id: 'poster', label: 'Poster Design', desc: 'Bold graphic layout & print finish' },
   { id: 'logo', label: 'Logo Design', desc: 'Clean iconic brand mark & vector craft' },
   { id: 'illustration', label: 'Illustration', desc: 'Editorial digital art & brushwork' },
   { id: 'wallpaper', label: 'Wallpaper', desc: 'Crisp immersive scenic background' },
-  { id: 'cinematic', label: 'Cinematic', desc: 'Dramatic film lighting & color grade' },
 ];
 
 const STANDARD_GEMINI_RATIOS: Array<{ ratio: GeminiAspectRatio; value: number }> = [
@@ -343,6 +344,7 @@ export function detectImageIntentAndSize(
   sizePreset: ImageSizePreset;
   customWidth: number;
   customHeight: number;
+  detectedStyle?: ImageStyle;
 } | null {
   const text = rawText.trim();
   if (!text || text.length > 500) return null;
@@ -359,15 +361,22 @@ export function detectImageIntentAndSize(
   }
 
   const directImageVerbRegex =
-    /^(?:please\s+|can you\s+|could you\s+)?(?:generate|create|draw|make|design|render|paint|sketch|produce|imagine)\s+(?:me\s+)?(?:an?\s+|the\s+)?(?:[a-z0-9-]+\s+){0,4}?(?:image|picture|photo|photograph|illustration|artwork|art|poster|logo|wallpaper|cartoon|anime|portrait|3d\s+render|3d\s+art|avatar|banner|flyer|thumbnail)\b/i;
+    /^(?:please\s+|can you\s+|could you\s+)?(?:generate|create|draw|make|design|render|paint|sketch|produce|imagine)\s+(?:me\s+)?(?:an?\s+|the\s+)?(?:[a-z0-9-]+\s+){0,4}?(?:image|picture|photo|photograph|illustration|artwork|digital\s+art|art|poster|logo|wallpaper|cartoon|anime|portrait|3d\s+render|3d\s+art|avatar|banner|flyer|thumbnail|painting)\b/i;
   const directSlashRegex = /^\/(?:image|img|imagine)\s+/i;
   const manglishImageRegex =
-    /^(?:oru\s+)?(?:[a-z0-9-]+\s+){0,4}?(?:image|photo|picture|poster|logo|wallpaper)\s+(?:create|generate|undakk|tharu|varakk)/i;
+    /\b(?:image|photo|picture|chithram|chitram|padam|poster|logo|wallpaper|cartoon|anime|digital\s+art|3d)\b.*\b(?:create|generate|undakk\w*|varakk\w*|varaykk\w*|tharu\w*|tharamo|cheyy\w*|venam)\b/i;
+  const malayalamScriptImageRegex =
+    /(?:ചിത്രം|ഫോട്ടോ|പോസ്റ്റർ|ലോഗോ|വാൾപേപ്പർ).*(?:വരയ്|ഉണ്ടാക്|തയ്യാറാക്|നിർമ്മി|തരു|വേണം)|(?:വരയ്|ഉണ്ടാക്|തയ്യാറാക്).*(?:ചിത്രം|ഫോട്ടോ|പോസ്റ്റർ|ലോഗോ)/;
+  const arabicImageRegex = /(?:ارسم|اصنع\s+صورة|صمم\s+صورة|صمم\s+شعار|أنشئ\s+صورة|ولّد\s+صورة)/;
+  const hindiImageRegex = /(?:तस्वीर\s+बना|चित्र\s+बना|इमेज\s+बना|फोटो\s+बना|लोगो\s+डिज़ाइन)/;
 
   if (
     !directImageVerbRegex.test(text) &&
     !directSlashRegex.test(text) &&
-    !manglishImageRegex.test(text)
+    !manglishImageRegex.test(text) &&
+    !malayalamScriptImageRegex.test(text) &&
+    !arabicImageRegex.test(text) &&
+    !hindiImageRegex.test(text)
   ) {
     return null;
   }
@@ -408,12 +417,24 @@ export function detectImageIntentAndSize(
     sizePreset = '1:1';
   }
 
+  let detectedStyle: ImageStyle | undefined;
+  if (/\bdigital\s+art\b/.test(lower)) detectedStyle = 'digital_art';
+  else if (/\b3d\b/.test(lower)) detectedStyle = '3d';
+  else if (/\banime\b/.test(lower)) detectedStyle = 'anime';
+  else if (/\bcartoon\b/.test(lower)) detectedStyle = 'cartoon';
+  else if (/\brealistic\b|\bphotorealistic\b/.test(lower)) detectedStyle = 'realistic';
+  else if (/\bcinematic\b/.test(lower)) detectedStyle = 'cinematic';
+  else if (/\bposter\b/.test(lower)) detectedStyle = 'poster';
+  else if (/\blogo\b/.test(lower)) detectedStyle = 'logo';
+  else if (/\bwallpaper\b/.test(lower)) detectedStyle = 'wallpaper';
+
   return {
     isImageRequest: true,
     prompt: cleanPrompt,
     sizePreset,
     customWidth,
     customHeight,
+    detectedStyle,
   };
 }
 

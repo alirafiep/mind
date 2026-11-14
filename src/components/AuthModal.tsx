@@ -10,17 +10,28 @@ declare global {
           initialize: (cfg: {
             client_id: string;
             auto_select?: boolean;
+            cancel_on_tap_outside?: boolean;
+            itp_support?: boolean;
             callback: (resp: { credential?: string }) => void;
           }) => void;
           renderButton: (el: HTMLElement, options: Record<string, unknown>) => void;
-          prompt: () => void;
+          prompt: (
+            momentListener?: (notification: {
+              isNotDisplayed?: () => boolean;
+              isSkippedMoment?: () => boolean;
+              isDismissedMoment?: () => boolean;
+            }) => void
+          ) => void;
+          disableAutoSelect?: () => void;
         };
         oauth2?: {
           initTokenClient: (cfg: {
             client_id: string;
             scope: string;
-            callback: (resp: { access_token?: string; error?: string }) => void;
-          }) => { requestAccessToken: () => void };
+            prompt?: string;
+            callback: (resp: { access_token?: string; error?: string; error_description?: string }) => void;
+            error_callback?: (err: { type: string; message?: string }) => void;
+          }) => { requestAccessToken: (overrideConfig?: { prompt?: string }) => void };
         };
       };
     };
@@ -53,21 +64,28 @@ function GoogleLogoIcon() {
 export function AuthModal() {
   const { showAuthModal, setShowAuthModal, googleClientId, user, theme, signInGoogle } = useApp();
 
+  const effectiveClientId =
+    googleClientId || (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) || null;
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [gsiReady, setGsiReady] = useState(false);
   const googleBtnRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (!showAuthModal || user || !googleClientId) return;
+    if (!showAuthModal || user || !effectiveClientId) return;
 
     const initGsi = () => {
       if (window.google?.accounts?.id && googleBtnRef.current) {
         window.google.accounts.id.initialize({
-          client_id: googleClientId,
+          client_id: effectiveClientId,
           auto_select: true,
+          itp_support: true,
           callback: async (resp) => {
-            if (!resp.credential) return;
+            if (!resp.credential) {
+              setError('Google authentication did not return a valid credential.');
+              return;
+            }
             setLoading(true);
             setError(null);
             try {
@@ -84,7 +102,7 @@ export function AuthModal() {
           theme: theme === 'dark' ? 'filled_black' : 'outline',
           size: 'large',
           shape: 'rectangular',
-          text: 'continue_with',
+          text: 'signin_with',
           width: 340,
         });
         setGsiReady(true);
@@ -109,25 +127,35 @@ export function AuthModal() {
     script.async = true;
     script.defer = true;
     script.onload = initGsi;
+    script.onerror = () => {
+      setError('Unable to load Google Sign-In script. Check your network connection.');
+    };
     document.head.appendChild(script);
-  }, [googleClientId, showAuthModal, signInGoogle, theme, user]);
+  }, [effectiveClientId, showAuthModal, signInGoogle, theme, user]);
 
   if (!showAuthModal || user) return null;
 
   const handleGoogleClick = () => {
     setError(null);
-    if (!googleClientId) {
-      setError('Google Sign-In is currently being configured. Please try again shortly.');
+    if (!effectiveClientId) {
+      setError(
+        `Google OAuth Client ID (GOOGLE_CLIENT_ID) is not configured for ${window.location.origin}. Add a valid Google OAuth Web Client ID in your environment configuration with this URL in Authorized JavaScript Origins.`
+      );
       return;
     }
+
     if (window.google?.accounts?.oauth2) {
       setLoading(true);
       const client = window.google.accounts.oauth2.initTokenClient({
-        client_id: googleClientId,
+        client_id: effectiveClientId,
         scope: 'openid profile email',
+        prompt: 'select_account',
         callback: async (resp) => {
           if (resp.error || !resp.access_token) {
             setLoading(false);
+            if (resp.error && resp.error !== 'access_denied') {
+              setError(resp.error_description || `Google authentication failed (${resp.error}).`);
+            }
             return;
           }
           try {
@@ -138,12 +166,20 @@ export function AuthModal() {
             setLoading(false);
           }
         },
+        error_callback: (err) => {
+          setLoading(false);
+          if (err.type === 'popup_failed_to_open') {
+            setError('Google Sign-In popup was blocked. Please allow popups for this site and try again.');
+          } else if (err.type !== 'popup_closed') {
+            setError(err.message || 'Google Sign-In could not complete.');
+          }
+        },
       });
-      client.requestAccessToken();
+      client.requestAccessToken({ prompt: 'select_account' });
     } else if (window.google?.accounts?.id) {
       window.google.accounts.id.prompt();
     } else {
-      setError('Google Sign-In is still loading. Please try again.');
+      setError('Google Sign-In library is unavailable. Please refresh the page and try again.');
     }
   };
 
@@ -153,10 +189,10 @@ export function AuthModal() {
         <div className="flex items-start justify-between gap-4 mb-5">
           <div>
             <h2 className="text-lg font-bold text-slate-900 dark:text-white">
-              Sign in to MindMaster AI
+              Sign in with Google
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              Continue directly with your Google account.
+              Select your Google account to continue straight to chat.
             </p>
           </div>
           <button
@@ -170,11 +206,11 @@ export function AuthModal() {
         </div>
 
         <div className="space-y-4">
-          {googleClientId && (
+          {effectiveClientId && (
             <div ref={googleBtnRef} className="flex justify-center min-h-[42px]" />
           )}
 
-          {(!googleClientId || !gsiReady) && (
+          {(!effectiveClientId || !gsiReady) && (
             <button
               type="button"
               onClick={handleGoogleClick}
@@ -182,7 +218,7 @@ export function AuthModal() {
               className="w-full py-3 px-4 rounded-xl bg-white dark:bg-slate-950 hover:bg-slate-50 dark:hover:bg-slate-800/80 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-sm font-semibold transition-colors flex items-center justify-center gap-3 shadow-xs cursor-pointer disabled:opacity-60"
             >
               {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <GoogleLogoIcon />}
-              <span>Continue with Google</span>
+              <span>Sign in with Google</span>
             </button>
           )}
 

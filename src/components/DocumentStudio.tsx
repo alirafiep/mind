@@ -9,6 +9,7 @@ import {
 import { useApp } from '../context/AppContext';
 import { api } from '../services/api';
 import { MarkdownRenderer } from './MarkdownRenderer';
+import { isManglishOrMalayalam } from '../utils/language';
 import type { LibraryItemType } from '../types/app';
 
 export function DocumentStudio() {
@@ -43,9 +44,13 @@ export function DocumentStudio() {
 
     setIsDrafting(true);
     let draft = '';
+    const rawUserPrompt = aiPrompt.trim();
+    const isMlRequest = isManglishOrMalayalam(rawUserPrompt);
     const promptText = content.trim()
-      ? `Current document titled "${title}":\n\n${content}\n\nInstruction: ${aiPrompt.trim()}\n\nReturn the complete updated Markdown document.`
-      : `Create a well-structured, comprehensive Markdown document for: ${aiPrompt.trim()}`;
+      ? `${isMlRequest ? 'നിർദ്ദേശം (Instruction — reply completely in proper Malayalam script മലയാളം):' : 'Instruction:'} ${rawUserPrompt}\n\nCurrent document titled "${title}":\n\n${content}\n\nReturn the complete updated Markdown document.`
+      : isMlRequest
+      ? `ഈ വിഷയത്തിൽ പൂർണ്ണമായ മലയാളം ലിപിയിൽ (Malayalam script) ഒരു നല്ല Markdown രേഖ തയ്യാറാക്കുക: ${rawUserPrompt}`
+      : `Create a well-structured, comprehensive Markdown document for: ${rawUserPrompt}`;
 
     try {
       await api.streamChat({
@@ -57,7 +62,7 @@ export function DocumentStudio() {
             timestamp: Date.now(),
           },
         ],
-        language,
+        language: isMlRequest && language === 'auto' ? 'ml' : language,
         customInstructions,
         onDelta: (chunk) => {
           draft += chunk;

@@ -160,6 +160,7 @@ export type ImageStyle =
   | 'anime'
   | 'cartoon'
   | '3d'
+  | 'digital_art'
   | 'illustration'
   | 'poster'
   | 'logo'

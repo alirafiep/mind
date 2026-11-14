@@ -58,6 +58,11 @@ import type {
   WebSource,
 } from './src/types/app.ts';
 import { resolveImageDimensions } from './src/utils/imageSizes.ts';
+import {
+  detectTextLanguage,
+  isManglishOrMalayalam,
+  resolveEffectiveConversationLanguage,
+} from './src/utils/language.ts';
 
 dotenv.config();
 
@@ -89,6 +94,18 @@ function hasValidApiKey(): boolean {
 function parseGeminiError(err: unknown): { status: number; code: string; message: string } {
   const raw = err instanceof Error ? err.message : String(err);
   const lower = raw.toLowerCase();
+  if (
+    lower.includes('503') ||
+    lower.includes('unavailable') ||
+    lower.includes('high demand') ||
+    lower.includes('overloaded')
+  ) {
+    return {
+      status: 503,
+      code: 'MODEL_BUSY',
+      message: 'The AI model is experiencing temporary high demand. Please try again in a moment.',
+    };
+  }
   if (lower.includes('403') || lower.includes('permission_denied') || lower.includes('api_key')) {
     return {
       status: 503,
@@ -122,6 +139,24 @@ function parseGeminiError(err: unknown): { status: number; code: string; message
     code: 'AI_ERROR',
     message: raw || 'An unexpected error occurred while processing your AI request.',
   };
+}
+
+async function withTransientRetry<T>(fn: () => Promise<T>, retries = 1): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      const raw = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+      const isTransient = raw.includes('503') || raw.includes('unavailable') || raw.includes('high demand');
+      if (!isTransient || attempt === retries) {
+        throw err;
+      }
+      await new Promise((r) => setTimeout(r, 700 * (attempt + 1)));
+    }
+  }
+  throw lastErr;
 }
 
 function getGuestClientKey(req: Request): string {
@@ -302,19 +337,25 @@ app.get('/api/media/:filename', async (req: Request, res: Response) => {
 function buildChatSystemInstruction(
   language: LanguagePreference,
   customInstructions?: CustomInstructions,
-  webSearch?: boolean
+  webSearch?: boolean,
+  messages: ChatMessage[] = []
 ): string {
+  const effectiveLang = resolveEffectiveConversationLanguage(messages, language);
+
   const languageDirectives: Record<LanguagePreference, string> = {
-    auto: `MULTILINGUAL AUTO-DETECTION (CRITICAL):
-- Automatically detect the language and script of the user's latest message.
-- If the user writes in **Manglish** (Malayalam written in English/Latin letters, e.g., "sughamano", "entha vishesham", "keralathile ettavum valiya nadi ethanu", "malayalathil parayu"), understand the meaning accurately and reply naturally in **Manglish** (or Malayalam script if they ask for Malayalam script).
-- If the user writes in **Malayalam (മലയാളം)**, reply in natural, accurate Malayalam.
+    auto: `MULTILINGUAL AUTO-DETECTION & MANGLISH-TO-MALAYALAM INTELLIGENCE (CRITICAL):
+- Automatically detect the language and script of every new user message.
+- **MANGLISH RULE (STRICT):** If the user writes in **Manglish** (Malayalam written using English/Latin letters — including spelling variations, typing mistakes, informal slang, and short forms such as "Ningalude peru entha?", "Oru katha parayu", "sughamano", "sghamano", "ntha vishesham", "njn evda pokanam", "ktha pryu", "mlylm", "tharamo", "cheyyu"), you MUST understand the exact meaning and reply **completely and exclusively in proper Malayalam script (മലയാളം)**.
+  - NEVER reply in English or Manglish (Latin transliteration) when the user writes in Manglish.
+  - Do NOT merely translate the user's question word-for-word; understand the question and provide a complete, natural, meaningful answer in proper Malayalam script.
+- If the user writes in **Malayalam script (മലയാളം)**, reply in natural, proper Malayalam script.
 - If the user writes in **English**, reply in clear English.
-- If the user writes in **Arabic (العربية)**, **Hindi (हिन्दी)**, **Spanish (Español)**, **French (Français)**, **Urdu (اردو)**, or any other language or mixed language, match their exact language and script seamlessly.
-- Maintain the conversation's active language across follow-up turns unless the user switches or asks for another language.`,
+- If the user writes in **Arabic (العربية)**, reply in clear, natural Arabic.
+- If the user writes in **Hindi (हिन्दी)**, **Spanish (Español)**, **French (Français)**, **Urdu (اردو)**, or any other language, reply in that same language and script.
+- Maintain the conversation's active language across follow-up turns unless the user clearly switches or asks for another language.`,
     en: `Respond in clear, accurate English unless the user explicitly switches to another language.`,
-    ml: `Respond in natural, fluent Malayalam (മലയാളം). Even if the user mixes English technical terms, keep the response in clear Malayalam.`,
-    manglish: `Respond in natural, friendly Manglish (Malayalam written phonetically using English/Latin letters, e.g., "Njan sahayikkam!"). Understand both Manglish and Malayalam inputs seamlessly.`,
+    ml: `Respond completely and naturally in proper Malayalam script (മലയാളം). Understand both Malayalam script and Manglish inputs (including typos and short forms), and NEVER reply in English or Manglish transliteration.`,
+    manglish: `Understand Manglish inputs (Malayalam written in English letters, including typos, informal expressions, and short forms) accurately and ALWAYS reply completely in proper Malayalam script (മലയാളം). Do NOT reply in English or Manglish transliteration.`,
     ar: `Respond in clear, natural Arabic (العربية).`,
     hi: `Respond in clear, natural Hindi (हिन्दी).`,
     es: `Respond in clear, natural Spanish (Español).`,
@@ -322,9 +363,29 @@ function buildChatSystemInstruction(
     ur: `Respond in clear, natural Urdu (اردو).`,
   };
 
+  let turnLanguageOverride = '';
+  if (effectiveLang === 'ml') {
+    turnLanguageOverride = `\n\nMANDATORY OUTPUT LANGUAGE FOR THIS RESPONSE:
+- The user is communicating in Manglish/Malayalam. Reply completely in proper **Malayalam script (മലയാളം)**.
+- Do NOT write your response in English or Manglish (except essential programming code inside fenced code blocks if coding help was requested).
+- Provide a full, accurate, helpful answer in natural Malayalam—never just repeat or translate the question.`;
+  } else if (effectiveLang === 'ar') {
+    turnLanguageOverride = `\n\nMANDATORY OUTPUT LANGUAGE FOR THIS RESPONSE: Reply completely in clear, natural Arabic (العربية).`;
+  } else if (effectiveLang === 'hi') {
+    turnLanguageOverride = `\n\nMANDATORY OUTPUT LANGUAGE FOR THIS RESPONSE: Reply completely in clear, natural Hindi (हिन्दी).`;
+  } else if (effectiveLang === 'ur') {
+    turnLanguageOverride = `\n\nMANDATORY OUTPUT LANGUAGE FOR THIS RESPONSE: Reply completely in clear, natural Urdu (اردو).`;
+  } else if (effectiveLang === 'es') {
+    turnLanguageOverride = `\n\nMANDATORY OUTPUT LANGUAGE FOR THIS RESPONSE: Reply completely in clear, natural Spanish (Español).`;
+  } else if (effectiveLang === 'fr') {
+    turnLanguageOverride = `\n\nMANDATORY OUTPUT LANGUAGE FOR THIS RESPONSE: Reply completely in clear, natural French (Français).`;
+  } else if (effectiveLang === 'en') {
+    turnLanguageOverride = `\n\nMANDATORY OUTPUT LANGUAGE FOR THIS RESPONSE: Reply in clear, accurate English (unless the user explicitly wrote Manglish—if any Manglish is present, always reply in proper Malayalam script).`;
+  }
+
   let instruction = `You are MindMaster AI, an intelligent, thoughtful, and highly capable AI assistant.
 
-${languageDirectives[language] || languageDirectives.auto}
+${languageDirectives[language] || languageDirectives.auto}${turnLanguageOverride}
 
 INTELLIGENT BEHAVIOUR & INSTANT RESPONSIVENESS:
 - Answer questions across any subject or domain freely—never restrict users to predefined topics.
@@ -397,7 +458,12 @@ app.post('/api/chat/stream', async (req: Request, res: Response) => {
 
   try {
     const ai = getAiClient();
-    const systemInstruction = buildChatSystemInstruction(language, customInstructions, webSearch);
+    const systemInstruction = buildChatSystemInstruction(
+      language,
+      customInstructions,
+      webSearch,
+      messages
+    );
 
     // Map conversation history into Gemini Content objects
     const contents = messages.map((msg, idx) => {
@@ -438,11 +504,13 @@ app.post('/api/chat/stream', async (req: Request, res: Response) => {
       config.tools = [{ googleSearch: {} }];
     }
 
-    const stream = await ai.models.generateContentStream({
-      model: 'gemini-4-hydrogen',
-      contents,
-      config,
-    });
+    const stream = await withTransientRetry(() =>
+      ai.models.generateContentStream({
+        model: 'gemini-4-hydrogen',
+        contents,
+        config,
+      })
+    );
 
     const seenUrls = new Set<string>();
     const collectedSources: WebSource[] = [];
@@ -500,9 +568,13 @@ app.post('/api/chat/title', async (req: Request, res: Response) => {
   }
   try {
     const ai = getAiClient();
+    const isMl = isManglishOrMalayalam(firstMessage);
+    const titlePrompt = isMl
+      ? `The user wrote this message in Manglish/Malayalam. Generate a concise 3 to 6 word conversation title in proper **Malayalam script (മലയാളം)** (never in Manglish or English). Return only the title text without quotes:\n\n${firstMessage.slice(0, 400)}`
+      : `Generate a concise 3 to 6 word title (in the same language/script as the prompt; if the prompt is Manglish, write the title in proper Malayalam script) summarizing this user message. Return only the title text without quotes:\n\n${firstMessage.slice(0, 400)}`;
     const response = await ai.models.generateContent({
       model: 'gemini-4-hydrogen',
-      contents: `Generate a concise 3 to 6 word title (in the same language/script as the prompt) summarizing this user message. Return only the title text without quotes:\n\n${firstMessage.slice(0, 400)}`,
+      contents: titlePrompt,
       config: {
         thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
       },
@@ -606,6 +678,7 @@ const IMAGE_STYLE_PROMPTS: Record<Exclude<ImageStyle, 'auto'>, string> = {
   anime: 'high-craft studio anime illustration, crisp cel shading, expressive lighting, vibrant anime key visual',
   cartoon: 'vibrant stylized 2D/3D cartoon illustration, expressive character shapes, clean linework and rich color',
   '3d': 'clean octane 3D render, physically based materials, studio softbox rim lighting, smooth subsurface detail',
+  digital_art: 'high-detail digital art, vibrant concept painting, rich atmospheric depth, polished modern digital brushwork',
   illustration: 'editorial digital illustration, expressive brushwork, refined composition, cohesive palette',
   poster: 'modern graphic poster design, bold visual hierarchy, crisp typography-ready composition, studio print finish',
   logo: 'minimalist iconic vector-style logo design, crisp geometric precision, balanced negative space, scalable brand mark',
@@ -678,33 +751,74 @@ app.post('/api/image/generate', async (req: Request, res: Response) => {
   });
 
   const styleModifier = style !== 'auto' ? IMAGE_STYLE_PROMPTS[style] : undefined;
-  const fullPrompt = styleModifier
-    ? `${prompt.trim()}. Visual style: ${styleModifier}.`
-    : prompt.trim();
+
+  let effectiveVisualPrompt = prompt.trim();
+  let assistantMessage: string | undefined;
+  const detectedLang = detectTextLanguage(prompt);
 
   try {
     const ai = getAiClient();
-    const response = await ai.models.generateContent({
-      model,
-      contents: {
-        parts: [
-          {
-            text: fullPrompt,
+
+    // Interpret Manglish, Malayalam, or non-English image prompts into vivid English visual prompt
+    // + a proper localized reply message (proper Malayalam script for Manglish/Malayalam!)
+    if (detectedLang !== 'en' && detectedLang !== 'unknown') {
+      try {
+        const interpretRes = await ai.models.generateContent({
+          model: 'gemini-4-hydrogen',
+          contents: `Analyze this image generation request (detected language: ${detectedLang}).
+If it is in Manglish (Malayalam in English letters, possibly with typos or informal words) or Malayalam, understand its exact meaning and cultural context.
+Return a strict JSON object with two string keys:
+1. "visualPrompt": a rich, accurate English image-generation description preserving every detail of the user's request (no markdown, plain text).
+2. "replyMessage": a short, natural confirmation/caption describing the created image. CRITICAL: If the user used Manglish or Malayalam, write "replyMessage" ONLY in proper Malayalam script (മലയാളം), never in English or Manglish. If Arabic, write in Arabic. Otherwise match the user's language.
+
+User prompt: "${prompt.trim()}"`,
+          config: {
+            responseMimeType: 'application/json',
+            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
           },
-        ],
-      },
-      config: {
-        imageConfig:
-          model === 'gemini-nano-banana-2.1'
-            ? {
-                aspectRatio: resolvedDims.geminiAspectRatio,
-                imageSize,
-              }
-            : {
-                aspectRatio: resolvedDims.geminiAspectRatio,
-              },
-      },
-    });
+        });
+        const parsedPrompt = JSON.parse(interpretRes.text || '{}') as {
+          visualPrompt?: string;
+          replyMessage?: string;
+        };
+        if (parsedPrompt.visualPrompt?.trim()) {
+          effectiveVisualPrompt = parsedPrompt.visualPrompt.trim();
+        }
+        if (parsedPrompt.replyMessage?.trim()) {
+          assistantMessage = parsedPrompt.replyMessage.trim();
+        }
+      } catch {
+        // Fallback to raw prompt if interpretation fails
+      }
+    }
+
+    const fullPrompt = styleModifier
+      ? `${effectiveVisualPrompt}. Visual style: ${styleModifier}.`
+      : effectiveVisualPrompt;
+
+    const response = await withTransientRetry(() =>
+      ai.models.generateContent({
+        model,
+        contents: {
+          parts: [
+            {
+              text: fullPrompt,
+            },
+          ],
+        },
+        config: {
+          imageConfig:
+            model === 'gemini-nano-banana-2.1'
+              ? {
+                  aspectRatio: resolvedDims.geminiAspectRatio,
+                  imageSize,
+                }
+              : {
+                  aspectRatio: resolvedDims.geminiAspectRatio,
+                },
+        },
+      })
+    );
 
     // Iterate through all output parts to find the generated image bytes
     let imageData: string | undefined;
@@ -747,6 +861,7 @@ app.post('/api/image/generate', async (req: Request, res: Response) => {
       mediaUrl,
       mimeType: 'image/png',
       prompt: prompt.trim(),
+      assistantMessage,
       style,
       sizePreset: resolvedDims.sizePreset,
       sizeLabel: resolvedDims.sizeLabel,
@@ -844,12 +959,29 @@ app.post('/api/video/generate', async (req: Request, res: Response) => {
   }
 
   const styleDesc = VIDEO_STYLE_PROMPTS[style] || VIDEO_STYLE_PROMPTS.cinematic;
-  const fullPrompt = prompt.trim()
-    ? `${prompt.trim()}. Visual direction: ${styleDesc}.`
-    : `Animate this image smoothly with ${styleDesc}.`;
+  let resolvedVideoPrompt = prompt.trim();
 
   try {
     const ai = getAiClient();
+    if (resolvedVideoPrompt && isManglishOrMalayalam(resolvedVideoPrompt)) {
+      try {
+        const translated = await ai.models.generateContent({
+          model: 'gemini-4-hydrogen',
+          contents: `Convert this Manglish/Malayalam video generation prompt into a clear, vivid English visual scene description preserving all user details. Return only the English prompt text:\n\n${resolvedVideoPrompt}`,
+          config: { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } },
+        });
+        if (translated.text?.trim()) {
+          resolvedVideoPrompt = translated.text.trim();
+        }
+      } catch {
+        // fallback to original prompt
+      }
+    }
+
+    const fullPrompt = resolvedVideoPrompt
+      ? `${resolvedVideoPrompt}. Visual direction: ${styleDesc}.`
+      : `Animate this image smoothly with ${styleDesc}.`;
+
     const input = resolvedImageBase64
       ? [
           {

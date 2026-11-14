@@ -20,6 +20,8 @@ import type {
 const GUEST_CHATS_KEY = 'mindmaster_guest_chats_v2';
 const GUEST_LIBRARY_KEY = 'mindmaster_guest_library_v2';
 const GUEST_PINNED_PROMPTS_KEY = 'mindmaster_guest_pinned_prompts_v1';
+const EXPLICIT_SIGNOUT_KEY = 'mindmaster_explicit_signout_v1';
+const ONETAP_ATTEMPTED_KEY = 'mindmaster_onetap_attempted_v1';
 const THEME_KEY = 'mindmaster_theme_v2';
 const LANG_KEY = 'mindmaster_lang_v2';
 
@@ -359,6 +361,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const handleSessionSuccess = useCallback(
     async (res: { token: string; user: UserProfile; subscription: SubscriptionInfo }) => {
+      try {
+        sessionStorage.removeItem(EXPLICIT_SIGNOUT_KEY);
+        sessionStorage.removeItem(ONETAP_ATTEMPTED_KEY);
+      } catch {
+        // ignore storage errors
+      }
       setStoredToken(res.token);
       setUser(res.user);
       setSubscription(res.subscription);
@@ -420,6 +428,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   );
 
   const signOut = useCallback(() => {
+    try {
+      sessionStorage.setItem(EXPLICIT_SIGNOUT_KEY, '1');
+      window.google?.accounts?.id?.disableAutoSelect?.();
+    } catch {
+      // ignore storage / GSI errors
+    }
     setStoredToken(null);
     setUser(null);
     setSubscription(DEFAULT_SUBSCRIPTION);
@@ -432,6 +446,81 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     loadGuestState();
     notify('Signed out. Sign back in anytime with your Google account.', 'info');
   }, [loadGuestState, notify]);
+
+  // Automatic Google Sign-In via Google One Tap & auto_select when app opens
+  useEffect(() => {
+    const effectiveClientId =
+      googleClientId || (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) || null;
+    if (!authReady || user || !effectiveClientId) return;
+
+    try {
+      if (
+        sessionStorage.getItem(EXPLICIT_SIGNOUT_KEY) === '1' ||
+        sessionStorage.getItem(ONETAP_ATTEMPTED_KEY) === '1'
+      ) {
+        return;
+      }
+    } catch {
+      // continue without sessionStorage flags
+    }
+
+    let cancelled = false;
+
+    const triggerOneTap = () => {
+      if (cancelled || !window.google?.accounts?.id) return;
+
+      window.google.accounts.id.initialize({
+        client_id: effectiveClientId,
+        auto_select: true,
+        cancel_on_tap_outside: true,
+        itp_support: true,
+        callback: async (resp: { credential?: string }) => {
+          if (cancelled || !resp.credential) return;
+          try {
+            await signInGoogle({ idToken: resp.credential });
+          } catch {
+            // Silently fall back; user can click Sign In manually if verification fails
+          }
+        },
+      });
+
+      window.google.accounts.id.prompt((notification) => {
+        if (
+          notification.isDismissedMoment?.() ||
+          notification.isSkippedMoment?.() ||
+          notification.isNotDisplayed?.()
+        ) {
+          try {
+            sessionStorage.setItem(ONETAP_ATTEMPTED_KEY, '1');
+          } catch {
+            // ignore
+          }
+        }
+      });
+    };
+
+    if (window.google?.accounts?.id) {
+      triggerOneTap();
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const script = document.querySelector<HTMLScriptElement>(
+      'script[src="https://accounts.google.com/gsi/client"]'
+    );
+    if (script) {
+      script.addEventListener('load', triggerOneTap);
+      return () => {
+        cancelled = true;
+        script.removeEventListener('load', triggerOneTap);
+      };
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authReady, googleClientId, signInGoogle, user]);
 
   const updateProfile = useCallback(
     async (updates: {
