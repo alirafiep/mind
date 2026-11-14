@@ -262,6 +262,30 @@ export async function searchWebMultiSource(
   };
 }
 
+function trySolveBasicMath(query: string): { expression: string; result: number } | null {
+  const cleaned = query
+    .replace(/\b(what is|whats|what's|calculate|solve|evaluate|find|compute|the value of)\b/gi, ' ')
+    .replace(/[=?]/g, ' ')
+    .replace(/×/g, '*')
+    .replace(/÷/g, '/')
+    .trim();
+
+  if (!cleaned || !/^[0-9+\-*/().\s%^]+$/.test(cleaned)) return null;
+  if (!/[+\-*/%^]/.test(cleaned)) return null;
+
+  try {
+    const normalized = cleaned.replace(/\^/g, '**');
+    // Safe evaluation strictly restricted to numeric arithmetic tokens verified above
+    const val = Function(`"use strict"; return (${normalized});`)() as unknown;
+    if (typeof val === 'number' && Number.isFinite(val)) {
+      return { expression: cleaned, result: Number(val.toPrecision(12)) };
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 export function formatFallbackResearchResponse(params: {
   query: string;
   bundle: WebResearchBundle;
@@ -271,41 +295,90 @@ export function formatFallbackResearchResponse(params: {
   const { query, bundle, effectiveLang, modelLimitationNote } = params;
   const isMl = effectiveLang === 'ml' || effectiveLang === 'manglish';
 
-  const lines: string[] = [];
+  const mathSolved = trySolveBasicMath(query);
+  if (mathSolved) {
+    return isMl
+      ? `### ഗണിത ഉത്തരവും വിശദീകരണവും\n\n**ചോദ്യം:** \`${mathSolved.expression}\`\n\n**ഉത്തരം:** **${mathSolved.result}**\n\nകണക്കിലെ ഓപ്പറേറ്റർ മുൻഗണന (BODMAS/PEMDAS) അനുസരിച്ച് \`${mathSolved.expression}\` എന്നതിന്റെ കൃത്യമായ മൂല്യം **${mathSolved.result}** ആണ്.`
+      : `### Step-by-Step Calculation & Answer\n\n- **Expression:** \`${mathSolved.expression}\`\n- **Exact Result:** **${mathSolved.result}**\n\nEvaluating \`${mathSolved.expression}\` following standard order of operations (parentheses, exponents, multiplication/division, addition/subtraction) yields **${mathSolved.result}**.`;
+  }
 
-  if (bundle.findings.length > 0) {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (
+    /\b(ningalude peru entha|peru entha|entha peru|ninakku peru|who are you|what is your name|what's your name)\b/i.test(
+      normalizedQuery
+    )
+  ) {
+    return isMl
+      ? `എന്റെ പേര് **MIND MASTER AI** എന്നാണ്. മലയാളത്തിലും മംഗ്ലീഷിലും ഇംഗ്ലീഷിലും മറ്റ് ഭാഷകളിലും നിങ്ങളുടെ ചോദ്യങ്ങൾക്ക് കൃത്യമായ ഉത്തരങ്ങളും തത്സമയ വെബ് വിവരങ്ങളും നൽകാനും ചിത്രങ്ങൾ നിർമ്മിക്കാനും ഞാൻ സഹായിക്കും.`
+      : `I am **MIND MASTER AI**, your multilingual AI & Web Research Assistant. Ask me anything across languages, request step-by-step explanations, or generate images directly in chat.`;
+  }
+
+  const lines: string[] = [];
+  const filteredFindings = bundle.findings.filter(
+    (f) => !/enjoy the videos and music you love/i.test(f.snippet)
+  );
+
+  if (filteredFindings.length > 0) {
+    const overviewParagraph =
+      bundle.instantAbstract ||
+      filteredFindings.find((f) => f.provider === 'wikipedia' && f.snippet.length > 60)?.snippet ||
+      filteredFindings[0]?.snippet ||
+      '';
+
     lines.push(
       isMl
-        ? `### "${query}" എന്നതിനായുള്ള തത്സമയ വെബ് വിവരങ്ങൾ`
-        : `### Verified Live Web Research for "${query}"`
+        ? `### "${query}" — വിശദമായ വിവരണം`
+        : `### Detailed Answer & Verified Context: "${query}"`
     );
 
-    if (bundle.instantAbstract) {
-      lines.push(bundle.instantAbstract);
+    if (overviewParagraph) {
+      lines.push(overviewParagraph);
     }
 
-    lines.push(isMl ? `#### കണ്ടെത്തിയ പ്രധാന വിവരങ്ങളും ഉറവിടങ്ങളും:` : `#### Key Verified Sources & Findings:`);
+    const additionalPoints = filteredFindings
+      .filter((f) => f.snippet && f.snippet !== overviewParagraph)
+      .slice(0, 4);
 
-    for (const item of bundle.findings.slice(0, 6)) {
-      const snippetPart = item.snippet ? ` — ${item.snippet}` : '';
-      lines.push(`- **[${item.title}](${item.url})**${snippetPart}`);
+    if (additionalPoints.length > 0) {
+      lines.push(
+        isMl
+          ? `#### പ്രധാന പോയിന്റുകളും പരിശോധിച്ച വിവരങ്ങളും:`
+          : `#### Key Verified Details Across Sources:`
+      );
+      for (const item of additionalPoints) {
+        lines.push(`- **${item.title}:** ${item.snippet} ([Source](${item.url}))`);
+      }
     }
 
     lines.push(
       isMl
-        ? `\n> **കുറിപ്പ് (Limitation):** ${modelLimitationNote} മുകളിലുള്ള ലിങ്കുകളിൽ ക്ലിക്ക് ചെയ്ത് കൂടുതൽ വിശദാംശങ്ങൾ നേരിട്ട് പരിശോധിക്കാവുന്നതാണ്.`
-        : `\n> **Note on AI Synthesis:** ${modelLimitationNote} Verified live search results and clickable source links from multiple web sources are provided above so you have immediate, reliable information.`
+        ? `#### പരിശോധിച്ച ഉറവിടങ്ങൾ (Sources):\n` +
+            filteredFindings
+              .slice(0, 5)
+              .map((item) => `- [${item.title}](${item.url})`)
+              .join('\n')
+        : `#### Verified Reference Links:\n` +
+            filteredFindings
+              .slice(0, 5)
+              .map((item) => `- [${item.title}](${item.url})`)
+              .join('\n')
+    );
+
+    lines.push(
+      isMl
+        ? `> **കുറിപ്പ്:** ${modelLimitationNote} പൂർണ്ണമായ AI വിശകലനത്തിനായി **Settings > Secrets**-ൽ സജീവ ക്വോട്ട ഉള്ള ` + '`GEMINI_API_KEY`' + ` നൽകാവുന്നതാണ്.`
+        : `> **Note:** ${modelLimitationNote} Verified multi-source reference findings are synthesized above; attach an API key with active quota in **Settings > Secrets** for deeper conversational analysis.`
     );
   } else {
     lines.push(
       isMl
-        ? `### "${query}" സംബന്ധിച്ച വിവരങ്ങൾ`
-        : `### Research Summary for "${query}"`
+        ? `### "${query}" സംബന്ധിച്ച വിവരണം`
+        : `### Analysis & Research Summary for "${query}"`
     );
     lines.push(
       isMl
-        ? `തത്സമയ വെബ് തിരയലിൽ ഈ ചോദ്യത്തിന് കൃത്യമായ പൊതു വെബ് ഫലങ്ങൾ ഉടനടി കണ്ടെത്താനായില്ല.\n\n**വ്യക്തമായ കാരണം:** ${modelLimitationNote}\n\n**അടുത്ത ഘട്ടം:**\n- കൂടുതൽ വ്യക്തമായ കീവേഡുകൾ നൽകി വീണ്ടും ചോദിക്കാം (ഉദാഹരണത്തിന് വിഷയത്തിന്റെ കൃത്യമായ പേര് അല്ലെങ്കിൽ വർഷം).\n- AI മോഡൽ പൂർണ്ണ ശേഷിയിൽ പ്രവർത്തിക്കാൻ **Settings > Secrets**-ൽ ബില്ലിംഗ്/ക്വോട്ട ഉള്ള ` + '`GEMINI_API_KEY`' + ` അപ്ഡേറ്റ് ചെയ്യാവുന്നതാണ്.`
-        : `Direct public search queries did not return matching reference summaries for this specific phrasing.\n\n**Actual Limitation:** ${modelLimitationNote}\n\n**Practical Next Steps:**\n- Rephrase with specific keywords, product names, or dates so direct multi-source web lookup can match authoritative pages.\n- To restore full Gemini AI reasoning and synthesis alongside web search, attach an API key with active quota in **Settings > Secrets**.`
+        ? `നിലവിലെ AI മോഡൽ ക്വോട്ട പരിമിതി മൂലം പൂർണ്ണമായ AI വിശകലനം നടത്താൻ കഴിഞ്ഞില്ല, കൂടാതെ തത്സമയ വെബ് തിരയലിൽ ഈ ചോദ്യത്തിന് നേരിട്ടുള്ള പൊതു വിവരങ്ങൾ ലഭിച്ചില്ല.\n\n**വ്യക്തമായ കാരണം:** ${modelLimitationNote}\n\n**പരിഹാരം:**\n- വിഷയത്തിന്റെ പ്രധാന പദങ്ങൾ ഉപയോഗിച്ച് വീണ്ടും ചോദിച്ചാൽ ബന്ധപ്പെട്ട വിവരങ്ങൾ കണ്ടെത്താം.\n- പൂർണ്ണ AI വിശകലനത്തിന് **Settings > Secrets**-ൽ സജീവ ക്വോട്ട ഉള്ള ` + '`GEMINI_API_KEY`' + ` ചേർക്കുക.`
+        : `Full AI synthesis could not run due to the upstream API limitation below, and public search queries did not match direct reference articles for this phrasing.\n\n**Actual Limitation:** ${modelLimitationNote}\n\n**Practical Next Steps:**\n- Rephrase with specific keywords, concepts, or terms to match authoritative reference sources.\n- Attach a billing-enabled or active-quota key in **Settings > Secrets** to enable full Gemini analytical synthesis.`
     );
   }
 

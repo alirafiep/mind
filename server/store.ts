@@ -100,8 +100,12 @@ function loadDb(): DatabaseSchema {
     }
     const raw = fs.readFileSync(DB_FILE, 'utf-8');
     const parsed = JSON.parse(raw) as Partial<DatabaseSchema>;
+    const normalizedUsers: Record<string, UserProfile> = {};
+    for (const [uid, user] of Object.entries(parsed.users || {})) {
+      normalizedUsers[uid] = { ...user, authProvider: 'account' };
+    }
     return {
-      users: parsed.users || {},
+      users: normalizedUsers,
       credentials: parsed.credentials || {},
       subscriptions: parsed.subscriptions || {},
       guestImageUsage: parsed.guestImageUsage || {},
@@ -206,7 +210,7 @@ export function getOrCreateUser(params: {
   email: string;
   name: string;
   avatarUrl?: string;
-  authProvider: 'google' | 'account';
+  authProvider?: 'account';
 }): UserProfile {
   const normalizedEmail = params.email.trim().toLowerCase();
   const userId = 'usr_' + crypto.createHash('sha256').update(normalizedEmail).digest('hex').slice(0, 20);
@@ -225,7 +229,7 @@ export function getOrCreateUser(params: {
       existing.username = assignDefaultUniqueUsername(existing.name, existing.id);
     }
     if (params.avatarUrl) existing.avatarUrl = params.avatarUrl;
-    existing.authProvider = params.authProvider;
+    existing.authProvider = 'account';
     void persistDb();
     return existing;
   }
@@ -238,7 +242,7 @@ export function getOrCreateUser(params: {
     name: safeName,
     username: defaultUsername,
     avatarUrl: params.avatarUrl,
-    authProvider: params.authProvider,
+    authProvider: 'account',
     customInstructions: { ...DEFAULT_INSTRUCTIONS },
     preferredLanguage: 'auto',
     theme: 'dark',

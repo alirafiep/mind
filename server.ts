@@ -374,11 +374,9 @@ function buildChatSystemInstruction(
   - NEVER reply in English or Manglish (Latin transliteration) when the user writes in Manglish.
   - Do NOT merely translate the user's question word-for-word; understand the question and provide a complete, natural, meaningful answer in proper Malayalam script.
 - If the user writes in **Malayalam script (മലയാളം)**, reply in natural, proper Malayalam script.
-- If the user writes in **English**, reply in clear English.
-- If the user writes in **Arabic (العربية)**, reply in clear, natural Arabic.
-- If the user writes in **Hindi (हिन्दी)**, **Spanish (Español)**, **French (Français)**, **Urdu (اردو)**, or any other language, reply in that same language and script.
+- If the user writes in **English**, **Arabic (العربية)**, **Hindi (हिन्दी)**, **Tamil (தமிழ்)**, **Telugu (తెలుగు)**, **Kannada (ಕನ್ನಡ)**, **Bengali (বাংলা)**, **Urdu (اردو)**, **Spanish (Español)**, **French (Français)**, **German (Deutsch)**, **Portuguese (Português)**, **Chinese**, **Japanese**, **Korean**, or **any other language**, always reply in that exact same language and script.
 - Maintain the conversation's active language across follow-up turns unless the user clearly switches or asks for another language.`,
-    en: `Respond in clear, accurate English unless the user explicitly switches to another language.`,
+    en: `Respond in clear, accurate English (or match the user's language if they write in another language).`,
     ml: `Respond completely and naturally in proper Malayalam script (മലയാളം). Understand both Malayalam script and Manglish inputs (including typos and short forms), and NEVER reply in English or Manglish transliteration.`,
     manglish: `Understand Manglish inputs (Malayalam written in English letters, including typos, informal expressions, and short forms) accurately and ALWAYS reply completely in proper Malayalam script (മലയാളം). Do NOT reply in English or Manglish transliteration.`,
     ar: `Respond in clear, natural Arabic (العربية).`,
@@ -405,7 +403,9 @@ function buildChatSystemInstruction(
   } else if (effectiveLang === 'fr') {
     turnLanguageOverride = `\n\nMANDATORY OUTPUT LANGUAGE FOR THIS RESPONSE: Reply completely in clear, natural French (Français).`;
   } else if (effectiveLang === 'en') {
-    turnLanguageOverride = `\n\nMANDATORY OUTPUT LANGUAGE FOR THIS RESPONSE: Reply in clear, accurate English (unless the user explicitly wrote Manglish—if any Manglish is present, always reply in proper Malayalam script).`;
+    turnLanguageOverride = `\n\nMANDATORY OUTPUT LANGUAGE FOR THIS RESPONSE: Reply in the exact language of the user's message (English if the message is in English, or the user's own language if written in German, Portuguese, Indonesian, Turkish, Tamil, etc.; if any Manglish is present, always reply in proper Malayalam script).`;
+  } else {
+    turnLanguageOverride = `\n\nMANDATORY OUTPUT LANGUAGE FOR THIS RESPONSE: Automatically detect the user's language and script and reply completely in that exact language.`;
   }
 
   const todayIso = new Date().toISOString().slice(0, 10);
@@ -415,23 +415,21 @@ function buildChatSystemInstruction(
 ${languageDirectives[language] || languageDirectives.auto}${turnLanguageOverride}
 
 STRICT MISSION & RESPONSE RULES:
-- NEVER leave any question unanswered across any subject or domain.
-- NEVER say "I'm busy", "Try again later", or give unnecessary excuses.
-- NEVER say "I don't know" without first researching thoroughly and providing the closest accurate verified information or practical next steps.
-- Give complete, clear, direct, and genuinely useful answers in simple, easy-to-understand language structured cleanly with Markdown.
-- For complicated, multi-part, math, or technical questions, solve them clearly step by step.
-- Maintain complete context from all previous messages in the conversation so follow-up questions are answered immediately.
-- Never invent facts, statistics, quotes, URLs, links, or sources. Clearly distinguish verified facts from estimates.
-- If a specific detail or task cannot be completed exactly as requested, state the actual factual limitation clearly and immediately offer a working alternative or the closest verified answer.
+- Understand the user's question thoroughly, analyze what is truly being asked, and provide the accurate answer with a clear, detailed explanation and description written in your own words.
+- Do NOT merely copy content directly from websites or dump raw search snippets—always synthesize, explain the "why" and "how", and present an original, complete, easy-to-understand answer.
+- NEVER leave any question unanswered, and NEVER say "I'm busy", "Try again later", or give unnecessary excuses.
+- For complicated, technical, analytical, or multi-part questions, break down the reasoning and solve them clearly step by step with practical examples where helpful.
+- Maintain complete context from all previous messages in the conversation so follow-up questions are answered seamlessly.
+- Avoid assumptions and NEVER invent facts, statistics, quotes, URLs, links, or sources. Clearly distinguish verified facts from estimates.
+- If a specific detail cannot be verified or a task has a real limitation, explain the factual limitation transparently and offer the closest verified information or alternative solution.
 - When analyzing uploaded images or documents, inspect every detail carefully and reference what you observe.`;
 
   if (webSearch) {
-    instruction += `\n\nMANDATORY LIVE WEB RESEARCH RULES:
-- ALWAYS search the internet BEFORE answering every question—never rely solely on internal memory or assumptions.
-- Verify important facts, figures, dates, and claims across multiple reliable, authoritative, and up-to-date websites whenever possible. If one source fails or lacks detail, check another reliable source.
-- For current events, pricing, software versions, news, or changing topics, always prioritize the latest available information as of ${todayIso}.
-- Include clickable Markdown source links (e.g., [Source Name](https://...)) using ONLY the exact verified URLs returned by search results—never fabricate or guess a URL.
-- If live search returns limited results, provide the closest verified context found online and clearly note what could not be verified online.`;
+    instruction += `\n\nWEB RESEARCH & FACT VERIFICATION RULES:
+- Do not rely blindly on web search snippets alone—combine deep reasoning and subject analysis with live web search whenever current facts, latest versions, dates, statistics, or external verification are needed.
+- Cross-check important facts across multiple reliable, authoritative websites whenever possible, prioritizing the latest available information as of ${todayIso}.
+- Synthesize your explanation clearly in your own words, and include clickable Markdown links (e.g., [Source Name](https://...)) ONLY for verified URLs actually returned by search results—never fabricate a link.
+- If live search returns limited results, analyze the question thoroughly and provide the best verified answer while noting any aspect that could not be confirmed online.`;
   }
 
   if (customInstructions?.enabled) {
@@ -448,7 +446,7 @@ STRICT MISSION & RESPONSE RULES:
 
 app.post('/api/chat/stream', async (req: Request, res: Response) => {
   const {
-    messages = [],
+    messages: rawMessages = [],
     attachments = [],
     webSearch = true,
     language = 'auto',
@@ -461,7 +459,24 @@ app.post('/api/chat/stream', async (req: Request, res: Response) => {
     customInstructions?: CustomInstructions;
   };
 
-  if (!Array.isArray(messages) || messages.length === 0) {
+  const messages: ChatMessage[] = Array.isArray(rawMessages)
+    ? rawMessages
+        .filter((m): m is ChatMessage => Boolean(m && typeof m === 'object'))
+        .map((m, idx) => ({
+          ...m,
+          id: m.id || `msg_${idx}`,
+          role: m.role === 'assistant' ? 'assistant' : 'user',
+          content:
+            typeof m.content === 'string'
+              ? m.content
+              : typeof (m as unknown as { text?: unknown }).text === 'string'
+                ? String((m as unknown as { text: string }).text)
+                : '',
+          timestamp: typeof m.timestamp === 'number' ? m.timestamp : Date.now(),
+        }))
+    : [];
+
+  if (messages.length === 0) {
     return res.status(400).json({ error: 'Messages array is required.' });
   }
 
@@ -625,12 +640,18 @@ app.post('/api/chat/stream', async (req: Request, res: Response) => {
     if (hasValidApiKey()) {
       let tier1Code = '';
       let tier2Code = '';
+      const isComplexQuery =
+        latestUserText.length > 140 ||
+        /\b(step by step|prove|derive|analyze|compare|architecture|debug|algorithm|calculate|equation|why does|how does)\b/i.test(
+          latestUserText
+        );
+      const primaryThinkingLevel = isComplexQuery ? ThinkingLevel.MEDIUM : ThinkingLevel.LOW;
 
       // Tier 1: Primary Gemini 4 Hydrogen with native live Google Search grounding
       try {
         const ok = await streamModelAttempt({
           model: 'gemini-4-hydrogen',
-          thinkingLevel: ThinkingLevel.LOW,
+          thinkingLevel: primaryThinkingLevel,
           useGoogleSearchTool: webSearch,
           systemInstruction,
           contents: baseContents,

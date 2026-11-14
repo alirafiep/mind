@@ -47,7 +47,7 @@ export interface UserProfile {
   name: string;
   username?: string;
   avatarUrl?: string;
-  authProvider: 'google' | 'account';
+  authProvider: 'account';
   customInstructions: CustomInstructions;
   preferredLanguage: LanguagePreference;
   theme: Theme;
