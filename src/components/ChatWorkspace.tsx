@@ -262,7 +262,9 @@ export function ChatWorkspace() {
           m.id === assistantId
             ? {
                 ...m,
-                content: fullText || 'No response received.',
+                content:
+                  fullText ||
+                  'The connection closed before output was streamed. Please send your question again or rephrase with specific keywords to run a fresh multi-source web lookup.',
                 sources: sources.length > 0 ? sources : m.sources,
               }
             : m

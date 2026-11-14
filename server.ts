@@ -43,6 +43,11 @@ import {
   extractAuthUser,
   signSessionToken,
 } from './server/auth.ts';
+import {
+  formatFallbackResearchResponse,
+  searchWebMultiSource,
+  type WebResearchBundle,
+} from './server/webResearch.ts';
 import type {
   AspectRatioOption,
   BillingCycle,
@@ -102,42 +107,42 @@ function parseGeminiError(err: unknown): { status: number; code: string; message
   ) {
     return {
       status: 503,
-      code: 'MODEL_BUSY',
-      message: 'The AI model is experiencing temporary high demand. Please try again in a moment.',
+      code: 'MODEL_CAPACITY_LIMIT',
+      message: 'The primary Gemini model endpoint returned a 503 capacity limit for this request.',
     };
   }
   if (lower.includes('403') || lower.includes('permission_denied') || lower.includes('api_key')) {
     return {
-      status: 503,
-      code: 'AI_SERVICE_UNAVAILABLE',
-      message: 'The AI service is temporarily unavailable. Please try again shortly.',
+      status: 403,
+      code: 'API_KEY_PERMISSION',
+      message: 'The configured GEMINI_API_KEY in Settings > Secrets does not have permission for this model endpoint.',
     };
   }
   if (lower.includes('429') || lower.includes('resource_exhausted') || lower.includes('quota')) {
     return {
       status: 429,
       code: 'QUOTA_EXCEEDED',
-      message: 'The AI service is busy right now. Please try again in a few moments.',
+      message: 'The Gemini API quota for the configured key in Settings > Secrets has been reached.',
     };
   }
   if (lower.includes('404') || lower.includes('not_found')) {
     return {
       status: 404,
       code: 'MODEL_UNAVAILABLE',
-      message: 'The requested AI model endpoint returned not found. Please check model availability for your key.',
+      message: 'The requested Gemini model endpoint was not found for the configured API key.',
     };
   }
   if (lower.includes('400') || lower.includes('invalid_request') || lower.includes('invalid_argument')) {
     return {
       status: 400,
       code: 'INVALID_REQUEST',
-      message: raw || 'The AI request parameters were invalid. Please try adjusting your prompt or settings.',
+      message: raw || 'The AI request parameters were invalid. Adjusting prompt formatting may resolve this.',
     };
   }
   return {
     status: 500,
     code: 'AI_ERROR',
-    message: raw || 'An unexpected error occurred while processing your AI request.',
+    message: raw || 'An unexpected error occurred while processing the AI request.',
   };
 }
 
@@ -405,26 +410,28 @@ function buildChatSystemInstruction(
 
   const todayIso = new Date().toISOString().slice(0, 10);
 
-  let instruction = `You are MindMaster AI, an advanced Web Research Assistant and intelligent multilingual AI companion. Today's date is ${todayIso}.
+  let instruction = `You are MindMaster AI, the user's ultimate AI & Web Research Assistant. Today's date is ${todayIso}.
 
 ${languageDirectives[language] || languageDirectives.auto}${turnLanguageOverride}
 
-CORE WEB RESEARCH & ACCURACY RULES:
-- Answer questions across any subject or domain freely—never restrict users to predefined topics.
-- Provide complete, accurate, clear, and detailed answers immediately without unnecessary confirmation prompts or filler follow-up questions.
-- Explain complex concepts in simple, everyday language that is easy to understand, structured cleanly with Markdown (headings, bullet points, comparison tables, and code blocks when helpful).
-- Maintain complete context from all previous messages in the conversation so follow-up questions work naturally.
-- Never invent, guess, or fabricate facts, statistics, quotes, URLs, links, or sources.
-- If verified information cannot be found or is unavailable online, explicitly and honestly tell the user what could not be verified.
+STRICT MISSION & RESPONSE RULES:
+- NEVER leave any question unanswered across any subject or domain.
+- NEVER say "I'm busy", "Try again later", or give unnecessary excuses.
+- NEVER say "I don't know" without first researching thoroughly and providing the closest accurate verified information or practical next steps.
+- Give complete, clear, direct, and genuinely useful answers in simple, easy-to-understand language structured cleanly with Markdown.
+- For complicated, multi-part, math, or technical questions, solve them clearly step by step.
+- Maintain complete context from all previous messages in the conversation so follow-up questions are answered immediately.
+- Never invent facts, statistics, quotes, URLs, links, or sources. Clearly distinguish verified facts from estimates.
+- If a specific detail or task cannot be completed exactly as requested, state the actual factual limitation clearly and immediately offer a working alternative or the closest verified answer.
 - When analyzing uploaded images or documents, inspect every detail carefully and reference what you observe.`;
 
   if (webSearch) {
-    instruction += `\n\nMANDATORY WEB RESEARCH WORKFLOW (LIVE INTERNET SEARCH ENABLED):
-- ALWAYS search the internet using the web search tool BEFORE answering every question—never rely solely on internal memory or assumptions.
-- Verify important facts, figures, dates, and claims across multiple reliable, authoritative, and up-to-date websites whenever possible.
+    instruction += `\n\nMANDATORY LIVE WEB RESEARCH RULES:
+- ALWAYS search the internet BEFORE answering every question—never rely solely on internal memory or assumptions.
+- Verify important facts, figures, dates, and claims across multiple reliable, authoritative, and up-to-date websites whenever possible. If one source fails or lacks detail, check another reliable source.
 - For current events, pricing, software versions, news, or changing topics, always prioritize the latest available information as of ${todayIso}.
-- Include clickable Markdown source links (e.g., [Source Name](https://...)) using ONLY the exact verified URLs returned by your web search results—never fabricate or guess a link.
-- If live search returns no reliable information on the question, clearly inform the user that verified information is unavailable online.`;
+- Include clickable Markdown source links (e.g., [Source Name](https://...)) using ONLY the exact verified URLs returned by search results—never fabricate or guess a URL.
+- If live search returns limited results, provide the closest verified context found online and clearly note what could not be verified online.`;
   }
 
   if (customInstructions?.enabled) {
@@ -454,13 +461,6 @@ app.post('/api/chat/stream', async (req: Request, res: Response) => {
     customInstructions?: CustomInstructions;
   };
 
-  if (!hasValidApiKey()) {
-    return res.status(503).json({
-      error: 'AI chat service is temporarily unavailable. Please try again shortly.',
-      code: 'SERVICE_UNAVAILABLE',
-    });
-  }
-
   if (!Array.isArray(messages) || messages.length === 0) {
     return res.status(400).json({ error: 'Messages array is required.' });
   }
@@ -483,17 +483,12 @@ app.post('/api/chat/stream', async (req: Request, res: Response) => {
     }
   };
 
-  try {
-    const ai = getAiClient();
-    const systemInstruction = buildChatSystemInstruction(
-      language,
-      customInstructions,
-      webSearch,
-      messages
-    );
+  const effectiveLang = resolveEffectiveConversationLanguage(messages, language);
+  const latestUserText =
+    [...messages].reverse().find((m) => m.role === 'user' && m.content.trim())?.content.trim() || '';
 
-    // Map conversation history into Gemini Content objects
-    const contents = messages.map((msg, idx) => {
+  const buildContents = (extraWebContext?: WebResearchBundle) =>
+    messages.map((msg, idx) => {
       const isLastUser = idx === messages.length - 1 && msg.role === 'user';
       const parts: Array<Record<string, unknown>> = [];
 
@@ -514,6 +509,18 @@ app.post('/api/chat/stream', async (req: Request, res: Response) => {
         }
       }
 
+      if (isLastUser && extraWebContext && extraWebContext.findings.length > 0) {
+        const evidence = extraWebContext.findings
+          .map(
+            (f, i) =>
+              `[${i + 1}] ${f.title}\nURL: ${f.url}${f.snippet ? `\nExcerpt: ${f.snippet}` : ''}`
+          )
+          .join('\n\n');
+        parts.push({
+          text: `[LIVE MULTI-SOURCE WEB RESEARCH CONTEXT FOR THIS QUERY — USE THESE VERIFIED FACTS AND CLICKABLE URLS ONLY]\n${evidence}`,
+        });
+      }
+
       parts.push({ text: msg.content || ' ' });
 
       return {
@@ -522,30 +529,40 @@ app.post('/api/chat/stream', async (req: Request, res: Response) => {
       };
     });
 
+  const streamModelAttempt = async (params: {
+    model: string;
+    thinkingLevel: ThinkingLevel;
+    useGoogleSearchTool: boolean;
+    systemInstruction: string;
+    contents: Array<{ role: string; parts: Array<Record<string, unknown>> }>;
+    initialSources?: WebSource[];
+    timeoutMs?: number;
+  }): Promise<boolean> => {
+    const ai = getAiClient();
     const config: Record<string, unknown> = {
-      systemInstruction,
-      thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+      systemInstruction: params.systemInstruction,
+      thinkingConfig: { thinkingLevel: params.thinkingLevel },
+      abortSignal: AbortSignal.timeout(params.timeoutMs || 12000),
     };
-
-    if (webSearch) {
+    if (params.useGoogleSearchTool) {
       config.tools = [{ googleSearch: {} }];
     }
 
-    const stream = await withTransientRetry(() =>
-      ai.models.generateContentStream({
-        model: 'gemini-4-hydrogen',
-        contents,
-        config,
-      })
-    );
+    const stream = await ai.models.generateContentStream({
+      model: params.model,
+      contents: params.contents,
+      config,
+    });
 
-    const seenUrls = new Set<string>();
-    const collectedSources: WebSource[] = [];
+    const seenUrls = new Set<string>((params.initialSources || []).map((s) => s.url));
+    const collectedSources: WebSource[] = [...(params.initialSources || [])];
+    let emittedAnyText = false;
 
     for await (const chunk of stream) {
       if (clientClosed) break;
 
       if (chunk.text) {
+        emittedAnyText = true;
         sendEvent({ type: 'delta', text: chunk.text });
       }
 
@@ -579,6 +596,10 @@ app.post('/api/chat/stream', async (req: Request, res: Response) => {
       }
     }
 
+    if (!emittedAnyText && !clientClosed) {
+      return false;
+    }
+
     if (!clientClosed) {
       if (collectedSources.length > 0) {
         sendEvent({ type: 'sources', sources: collectedSources });
@@ -586,6 +607,123 @@ app.post('/api/chat/stream', async (req: Request, res: Response) => {
       sendEvent({ type: 'done' });
       res.end();
     }
+    return true;
+  };
+
+  let lastError: unknown = null;
+  let fallbackResearch: WebResearchBundle | null = null;
+
+  try {
+    const systemInstruction = buildChatSystemInstruction(
+      language,
+      customInstructions,
+      webSearch,
+      messages
+    );
+    const baseContents = buildContents();
+
+    if (hasValidApiKey()) {
+      let tier1Code = '';
+      let tier2Code = '';
+
+      // Tier 1: Primary Gemini 4 Hydrogen with native live Google Search grounding
+      try {
+        const ok = await streamModelAttempt({
+          model: 'gemini-4-hydrogen',
+          thinkingLevel: ThinkingLevel.LOW,
+          useGoogleSearchTool: webSearch,
+          systemInstruction,
+          contents: baseContents,
+          timeoutMs: 12000,
+        });
+        if (ok) return;
+      } catch (err) {
+        lastError = err;
+        tier1Code = parseGeminiError(err).code;
+      }
+
+      if (clientClosed) return;
+
+      // Tier 2: Secondary Flash Lite model with native live Google Search grounding
+      if (tier1Code !== 'API_KEY_PERMISSION') {
+        try {
+          const ok = await streamModelAttempt({
+            model: 'gemini-3.1-flash-lite',
+            thinkingLevel: ThinkingLevel.MINIMAL,
+            useGoogleSearchTool: webSearch,
+            systemInstruction,
+            contents: baseContents,
+            timeoutMs: 9000,
+          });
+          if (ok) return;
+        } catch (err) {
+          lastError = err;
+          tier2Code = parseGeminiError(err).code;
+        }
+      }
+
+      if (clientClosed) return;
+
+      // Tier 3: Alternative multi-source web research + model synthesis (only if key isn't quota/permission blocked on both models)
+      const bothQuotaOrAuthBlocked =
+        (tier1Code === 'QUOTA_EXCEEDED' || tier1Code === 'API_KEY_PERMISSION') &&
+        (!tier2Code || tier2Code === 'QUOTA_EXCEEDED' || tier2Code === 'API_KEY_PERMISSION');
+
+      fallbackResearch = latestUserText
+        ? await searchWebMultiSource(latestUserText, effectiveLang)
+        : { findings: [], sources: [] };
+
+      if (!bothQuotaOrAuthBlocked) {
+        const groundedContents = buildContents(fallbackResearch);
+        for (const fallbackModel of [
+          { model: 'gemini-4-hydrogen', thinkingLevel: ThinkingLevel.LOW },
+          { model: 'gemini-3.1-flash-lite', thinkingLevel: ThinkingLevel.MINIMAL },
+        ]) {
+          if (clientClosed) return;
+          try {
+            const ok = await streamModelAttempt({
+              model: fallbackModel.model,
+              thinkingLevel: fallbackModel.thinkingLevel,
+              useGoogleSearchTool: false,
+              systemInstruction,
+              contents: groundedContents,
+              initialSources: fallbackResearch.sources,
+              timeoutMs: 9000,
+            });
+            if (ok) return;
+          } catch (err) {
+            lastError = err;
+          }
+        }
+      }
+    }
+
+    if (clientClosed) return;
+
+    // Tier 4: All Gemini synthesis endpoints failed/unconfigured -> deliver direct verified multi-source live web research + honest limitation
+    if (!fallbackResearch) {
+      fallbackResearch = latestUserText
+        ? await searchWebMultiSource(latestUserText, effectiveLang)
+        : { findings: [], sources: [] };
+    }
+
+    const limitationMsg = hasValidApiKey()
+      ? parseGeminiError(lastError || new Error('Gemini API quota or capacity reached')).message
+      : 'GEMINI_API_KEY is not configured in Settings > Secrets.';
+
+    const directAnswer = formatFallbackResearchResponse({
+      query: latestUserText || 'your request',
+      bundle: fallbackResearch,
+      effectiveLang,
+      modelLimitationNote: limitationMsg,
+    });
+
+    sendEvent({ type: 'delta', text: directAnswer });
+    if (fallbackResearch.sources.length > 0) {
+      sendEvent({ type: 'sources', sources: fallbackResearch.sources });
+    }
+    sendEvent({ type: 'done' });
+    res.end();
   } catch (err) {
     console.error('Chat stream error:', err);
     const parsed = parseGeminiError(err);
@@ -632,7 +770,9 @@ app.post('/api/audio/transcribe', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Audio data is required.' });
   }
   if (!hasValidApiKey()) {
-    return res.status(503).json({ error: 'Audio transcription is temporarily unavailable.' });
+    return res.status(503).json({
+      error: 'Audio transcription requires GEMINI_API_KEY in Settings > Secrets. You can type or paste your text directly into chat instead.',
+    });
   }
   try {
     const ai = getAiClient();
@@ -664,7 +804,9 @@ app.post('/api/audio/tts', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Text is required for speech synthesis.' });
   }
   if (!hasValidApiKey()) {
-    return res.status(503).json({ error: 'Voice playback is temporarily unavailable.' });
+    return res.status(503).json({
+      error: 'Neural voice playback requires GEMINI_API_KEY in Settings > Secrets; browser speech synthesis can be used as an alternative.',
+    });
   }
   try {
     const ai = getAiClient();
@@ -743,7 +885,7 @@ app.post('/api/image/generate', async (req: Request, res: Response) => {
   }
   if (!hasValidApiKey()) {
     return res.status(503).json({
-      error: 'Image generation is temporarily unavailable. Please try again shortly.',
+      error: 'Image generation requires an active GEMINI_API_KEY in Settings > Secrets.',
       code: 'SERVICE_UNAVAILABLE',
     });
   }
@@ -974,7 +1116,7 @@ app.post('/api/video/generate', async (req: Request, res: Response) => {
   }
   if (!hasValidApiKey()) {
     return res.status(503).json({
-      error: 'Video generation is temporarily unavailable. Please try again shortly.',
+      error: 'Video generation requires an active billing-enabled GEMINI_API_KEY in Settings > Secrets.',
       code: 'SERVICE_UNAVAILABLE',
     });
   }
