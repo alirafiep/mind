@@ -1,0 +1,6 @@
+{
+  "name": "MIND MASTER AI",
+  "description": "Advanced multilingual AI chat assistant, image generator, PRO video studio, and personal creative library.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

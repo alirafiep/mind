@@ -1,0 +1,173 @@
+{
+  "users": {
+    "usr_fd9415c7b8ff2bd28e3e": {
+      "id": "usr_fd9415c7b8ff2bd28e3e",
+      "email": "lasinkc987@gmail.com",
+      "name": "lasinkc987",
+      "authProvider": "account",
+      "customInstructions": {
+        "aboutUser": "",
+        "responseStyle": "",
+        "enabled": false
+      },
+      "preferredLanguage": "auto",
+      "theme": "dark",
+      "createdAt": 1794559511003
+    }
+  },
+  "subscriptions": {
+    "usr_fd9415c7b8ff2bd28e3e": {
+      "tier": "free",
+      "plan": "none",
+      "status": "none",
+      "imageUsageDate": "2026-11-13",
+      "imageUsageToday": 0,
+      "videoUsageMonthKey": "2026-11",
+      "videoUsageMonth": 0,
+      "transactions": []
+    }
+  },
+  "guestImageUsage": {},
+  "chats": {
+    "usr_fd9415c7b8ff2bd28e3e": [
+      {
+        "id": "chat_1794560971373_o0u23",
+        "title": "New Conversation",
+        "language": "auto",
+        "isTemporary": false,
+        "messages": [
+          {
+            "id": "msg_1794561248173_u",
+            "role": "user",
+            "content": "strike-football.netlify.app",
+            "attachments": [],
+            "timestamp": 1794561248173
+          },
+          {
+            "id": "msg_1794561248173_a",
+            "role": "assistant",
+            "content": "",
+            "timestamp": 1794561248173
+          },
+          {
+            "id": "msg_1794561411076_u",
+            "role": "user",
+            "content": "Create image (Square (1:1), 1024×1024 px): footba",
+            "timestamp": 1794561411076
+          },
+          {
+            "id": "msg_1794561411076_a",
+            "role": "assistant",
+            "content": "API rate limit or free-tier quota exceeded. Please try again shortly or verify your billing-enabled API key in Settings > Secrets.",
+            "timestamp": 1794561411837,
+            "isError": true
+          },
+          {
+            "id": "msg_1794561418411_u",
+            "role": "user",
+            "content": "football",
+            "attachments": [],
+            "timestamp": 1794561418411
+          },
+          {
+            "id": "msg_1794561418411_a",
+            "role": "assistant",
+            "content": "No response received.",
+            "timestamp": 1794561418411
+          }
+        ],
+        "createdAt": 1794560971373,
+        "updatedAt": 1794561434406,
+        "shareId": "shr_726c81ad0e03"
+      },
+      {
+        "id": "chat_1794560051124_8rfp3",
+        "title": "World Cup Poster Image Creation",
+        "language": "auto",
+        "isTemporary": false,
+        "messages": [
+          {
+            "id": "msg_1794560051124_u",
+            "role": "user",
+            "content": "creat a image abou world cup poster",
+            "attachments": [],
+            "timestamp": 1794560051124
+          },
+          {
+            "id": "msg_1794560051124_a",
+            "role": "assistant",
+            "content": "No response received.",
+            "timestamp": 1794560051124
+          }
+        ],
+        "createdAt": 1794560051124,
+        "updatedAt": 1794560247802
+      }
+    ]
+  },
+  "folders": {
+    "usr_fd9415c7b8ff2bd28e3e": [
+      {
+        "id": "fld_designs",
+        "name": "Designs & Media",
+        "createdAt": 1794559511003,
+        "updatedAt": 1794559511003
+      },
+      {
+        "id": "fld_projects",
+        "name": "Projects",
+        "createdAt": 1794559511003,
+        "updatedAt": 1794559511003
+      }
+    ]
+  },
+  "library": {
+    "usr_fd9415c7b8ff2bd28e3e": []
+  },
+  "sharedChats": {
+    "shr_ee36b86cc14d": {
+      "id": "shr_ee36b86cc14d",
+      "title": "New Conversation",
+      "authorName": "lasinkc987",
+      "language": "auto",
+      "messages": [
+        {
+          "id": "msg_1794561248173_u",
+          "role": "user",
+          "content": "strike-football.netlify.app",
+          "attachments": [],
+          "timestamp": 1794561248173
+        },
+        {
+          "id": "msg_1794561248173_a",
+          "role": "assistant",
+          "content": "",
+          "timestamp": 1794561248173
+        }
+      ],
+      "sharedAt": 1794561259870
+    },
+    "shr_726c81ad0e03": {
+      "id": "shr_726c81ad0e03",
+      "title": "New Conversation",
+      "authorName": "lasinkc987",
+      "language": "auto",
+      "messages": [
+        {
+          "id": "msg_1794561248173_u",
+          "role": "user",
+          "content": "strike-football.netlify.app",
+          "attachments": [],
+          "timestamp": 1794561248173
+        },
+        {
+          "id": "msg_1794561248173_a",
+          "role": "assistant",
+          "content": "",
+          "timestamp": 1794561248173
+        }
+      ],
+      "sharedAt": 1794561261354
+    }
+  }
+}
