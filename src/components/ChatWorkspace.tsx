@@ -53,7 +53,7 @@ const LANGUAGE_OPTIONS: Array<{ value: LanguagePreference; label: string }> = [
   { value: 'auto', label: 'Auto-Detect Language' },
   { value: 'en', label: 'English' },
   { value: 'ml', label: 'മലയാളം (Malayalam)' },
-  { value: 'manglish', label: 'Manglish → മലയാളം' },
+  { value: 'manglish', label: 'Manglish (Friendly Mix)' },
   { value: 'ar', label: 'العربية (Arabic)' },
   { value: 'hi', label: 'हिन्दी (Hindi)' },
   { value: 'es', label: 'Español (Spanish)' },
@@ -63,8 +63,8 @@ const LANGUAGE_OPTIONS: Array<{ value: LanguagePreference; label: string }> = [
 
 const STARTER_PROMPTS = [
   {
-    title: 'Multilingual & Manglish',
-    prompt: 'Sughamano? Keralathile ettavum famous aaya 5 sthalangalude details tharamo?',
+    title: 'Chill Manglish Chat',
+    prompt: 'Sughamano da? Innu entha vishesham, mood okke engane und? 😄',
   },
   {
     title: 'Web Research with Sources',

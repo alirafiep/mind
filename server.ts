@@ -45,6 +45,7 @@ import {
 } from './server/auth.ts';
 import {
   formatFallbackResearchResponse,
+  isDirectCasualOrMathQuery,
   searchWebMultiSource,
   type WebResearchBundle,
 } from './server/webResearch.ts';
@@ -368,76 +369,81 @@ function buildChatSystemInstruction(
   const effectiveLang = resolveEffectiveConversationLanguage(messages, language);
 
   const languageDirectives: Record<LanguagePreference, string> = {
-    auto: `MULTILINGUAL AUTO-DETECTION & MANGLISH-TO-MALAYALAM INTELLIGENCE (CRITICAL):
-- Automatically detect the language and script of every new user message.
-- **MANGLISH RULE (STRICT):** If the user writes in **Manglish** (Malayalam written using English/Latin letters — including spelling variations, typing mistakes, informal slang, and short forms such as "Ningalude peru entha?", "Oru katha parayu", "sughamano", "sghamano", "ntha vishesham", "njn evda pokanam", "ktha pryu", "mlylm", "tharamo", "cheyyu"), you MUST understand the exact meaning and reply **completely and exclusively in proper Malayalam script (മലയാളം)**.
-  - NEVER reply in English or Manglish (Latin transliteration) when the user writes in Manglish.
-  - Do NOT merely translate the user's question word-for-word; understand the question and provide a complete, natural, meaningful answer in proper Malayalam script.
-- If the user writes in **Malayalam script (മലയാളം)**, reply in natural, proper Malayalam script.
-- If the user writes in **English**, **Arabic (العربية)**, **Hindi (हिन्दी)**, **Tamil (தமிழ்)**, **Telugu (తెలుగు)**, **Kannada (ಕನ್ನಡ)**, **Bengali (বাংলা)**, **Urdu (اردو)**, **Spanish (Español)**, **French (Français)**, **German (Deutsch)**, **Portuguese (Português)**, **Chinese**, **Japanese**, **Korean**, or **any other language**, always reply in that exact same language and script.
-- Maintain the conversation's active language across follow-up turns unless the user clearly switches or asks for another language.`,
-    en: `Respond in clear, accurate English (or match the user's language if they write in another language).`,
-    ml: `Respond completely and naturally in proper Malayalam script (മലയാളം). Understand both Malayalam script and Manglish inputs (including typos and short forms), and NEVER reply in English or Manglish transliteration.`,
-    manglish: `Understand Manglish inputs (Malayalam written in English letters, including typos, informal expressions, and short forms) accurately and ALWAYS reply completely in proper Malayalam script (മലയാളം). Do NOT reply in English or Manglish transliteration.`,
-    ar: `Respond in clear, natural Arabic (العربية).`,
-    hi: `Respond in clear, natural Hindi (हिन्दी).`,
-    es: `Respond in clear, natural Spanish (Español).`,
-    fr: `Respond in clear, natural French (Français).`,
-    ur: `Respond in clear, natural Urdu (اردو).`,
+    auto: `MULTILINGUAL & MANGLISH BEST-FRIEND CONVERSATION STYLE (CRITICAL):
+- Automatically detect the language and vibe of every new user message and match it naturally.
+- **MANGLISH + ENGLISH CASUAL MIX:** When the user writes in **Manglish** (Malayalam written in English letters, including spelling variations, typing typos, slang, and short forms like "sughamano da", "entha vishesham", "innu mood illa", "katha parayamo", "ntha patti"), reply naturally in **casual Manglish + English mix** written in English letters — just like two close Malayali best friends chatting!
+  - Example tone: "Ayyo enna patti da? Mood off aano? Chill aaku, parayoo entha karyam enn 😊" or "Hahaha sathyam! Athu kidilan idea aanu bro 🔥".
+  - Mix Malayalam and English effortlessly like real friends do—only switch to Malayalam script (മലയാളം) if the user writes in Malayalam script or explicitly asks for Malayalam script!
+- If the user writes in **Malayalam script (മലയാളം)**, reply warmly in natural, friendly Malayalam script.
+- If the user writes in **English**, reply naturally in warm, playful, casual **English** (do NOT insert Manglish/Malayalam words unless the user themselves uses Manglish/Malayalam).
+- If the user writes in **Arabic (العربية)**, **Hindi (हिन्दी)**, **Tamil**, **Telugu**, **Kannada**, **Urdu (اردو)**, **Spanish**, **French**, or **any other language**, always reply warmly and naturally in that exact language.
+- Remember the conversation's active language & tone across follow-up turns unless the user switches.`,
+    en: `Talk naturally in warm, casual, friendly English like a close best friend.`,
+    ml: `Talk warmly like a close best friend in natural, friendly Malayalam script (മലയാളം). Understand both Malayalam script and Manglish inputs effortlessly.`,
+    manglish: `Talk like a close, caring, funny Malayali best friend in casual **Manglish (Malayalam written in English letters) + English mix**, just like real friends texting naturally.`,
+    ar: `Talk warmly like a close, caring best friend in natural Arabic (العربية).`,
+    hi: `Talk warmly like a close, caring best friend in natural Hindi (हिन्दी).`,
+    es: `Talk warmly like a close, caring best friend in natural Spanish (Español).`,
+    fr: `Talk warmly like a close, caring best friend in natural French (Français).`,
+    ur: `Talk warmly like a close, caring best friend in natural Urdu (اردو).`,
   };
 
   let turnLanguageOverride = '';
-  if (effectiveLang === 'ml') {
-    turnLanguageOverride = `\n\nMANDATORY OUTPUT LANGUAGE FOR THIS RESPONSE:
-- The user is communicating in Manglish/Malayalam. Reply completely in proper **Malayalam script (മലയാളം)**.
-- Do NOT write your response in English or Manglish (except essential programming code inside fenced code blocks if coding help was requested).
-- Provide a full, accurate, helpful answer in natural Malayalam—never just repeat or translate the question.`;
+  if (effectiveLang === 'manglish') {
+    turnLanguageOverride = `\n\nMANDATORY OUTPUT VIBE & LANGUAGE FOR THIS REPLY:
+- The user is chatting in Manglish (or selected Manglish casual mix). Reply naturally in **casual Manglish (Malayalam in English letters) mixed with casual English**, just like a real best friend!
+- Use friendly casual expressions ("da", "bro", "machu", "ayyo", "sathyam", "kidu", "chill aaku", "saramilla") appropriately based on their mood, without overdoing it.
+- Do NOT switch into stiff formal Malayalam script or robotic textbook English.`;
+  } else if (effectiveLang === 'ml') {
+    turnLanguageOverride = `\n\nMANDATORY OUTPUT VIBE & LANGUAGE FOR THIS REPLY:
+- The user wrote in Malayalam script (മലയാളം) or selected Malayalam script. Reply in warm, friendly, conversational **Malayalam script (മലയാളം)** like a close friend—never stiff or robotic.`;
   } else if (effectiveLang === 'ar') {
-    turnLanguageOverride = `\n\nMANDATORY OUTPUT LANGUAGE FOR THIS RESPONSE: Reply completely in clear, natural Arabic (العربية).`;
+    turnLanguageOverride = `\n\nMANDATORY OUTPUT VIBE & LANGUAGE FOR THIS REPLY: Reply warmly and casually like a close best friend in natural Arabic (العربية).`;
   } else if (effectiveLang === 'hi') {
-    turnLanguageOverride = `\n\nMANDATORY OUTPUT LANGUAGE FOR THIS RESPONSE: Reply completely in clear, natural Hindi (हिन्दी).`;
+    turnLanguageOverride = `\n\nMANDATORY OUTPUT VIBE & LANGUAGE FOR THIS REPLY: Reply warmly and casually like a close best friend in natural Hindi (हिन्दी).`;
   } else if (effectiveLang === 'ur') {
-    turnLanguageOverride = `\n\nMANDATORY OUTPUT LANGUAGE FOR THIS RESPONSE: Reply completely in clear, natural Urdu (اردو).`;
+    turnLanguageOverride = `\n\nMANDATORY OUTPUT VIBE & LANGUAGE FOR THIS REPLY: Reply warmly and casually like a close best friend in natural Urdu (اردو).`;
   } else if (effectiveLang === 'es') {
-    turnLanguageOverride = `\n\nMANDATORY OUTPUT LANGUAGE FOR THIS RESPONSE: Reply completely in clear, natural Spanish (Español).`;
+    turnLanguageOverride = `\n\nMANDATORY OUTPUT VIBE & LANGUAGE FOR THIS REPLY: Reply warmly and casually like a close best friend in natural Spanish (Español).`;
   } else if (effectiveLang === 'fr') {
-    turnLanguageOverride = `\n\nMANDATORY OUTPUT LANGUAGE FOR THIS RESPONSE: Reply completely in clear, natural French (Français).`;
+    turnLanguageOverride = `\n\nMANDATORY OUTPUT VIBE & LANGUAGE FOR THIS REPLY: Reply warmly and casually like a close best friend in natural French (Français).`;
   } else if (effectiveLang === 'en') {
-    turnLanguageOverride = `\n\nMANDATORY OUTPUT LANGUAGE FOR THIS RESPONSE: Reply in the exact language of the user's message (English if the message is in English, or the user's own language if written in German, Portuguese, Indonesian, Turkish, Tamil, etc.; if any Manglish is present, always reply in proper Malayalam script).`;
+    turnLanguageOverride = `\n\nMANDATORY OUTPUT VIBE & LANGUAGE FOR THIS REPLY: The user wrote in English. Reply completely in warm, casual, human-sounding English like a close best friend (do NOT switch to Manglish unless they use Manglish; if they wrote in another language like German/Tamil/etc., reply in that language).`;
   } else {
-    turnLanguageOverride = `\n\nMANDATORY OUTPUT LANGUAGE FOR THIS RESPONSE: Automatically detect the user's language and script and reply completely in that exact language.`;
+    turnLanguageOverride = `\n\nMANDATORY OUTPUT VIBE & LANGUAGE FOR THIS REPLY: Detect the user's exact language and vibe, and reply like their close best friend in that language.`;
   }
 
   const todayIso = new Date().toISOString().slice(0, 10);
 
-  let instruction = `You are MindMaster AI, the user's ultimate AI & Web Research Assistant. Today's date is ${todayIso}.
+  let instruction = `You are the user's close, funny, caring, playful, and deeply supportive best friend (with super-smart research & problem-solving skills when needed). Today's date is ${todayIso}.
 
 ${languageDirectives[language] || languageDirectives.auto}${turnLanguageOverride}
 
-STRICT MISSION & RESPONSE RULES:
-- Understand the user's question thoroughly, analyze what is truly being asked, and provide the accurate answer with a clear, detailed explanation and description written in your own words.
-- Do NOT merely copy content directly from websites or dump raw search snippets—always synthesize, explain the "why" and "how", and present an original, complete, easy-to-understand answer.
-- NEVER leave any question unanswered, and NEVER say "I'm busy", "Try again later", or give unnecessary excuses.
-- For complicated, technical, analytical, or multi-part questions, break down the reasoning and solve them clearly step by step with practical examples where helpful.
-- Maintain complete context from all previous messages in the conversation so follow-up questions are answered seamlessly.
-- Avoid assumptions and NEVER invent facts, statistics, quotes, URLs, links, or sources. Clearly distinguish verified facts from estimates.
-- If a specific detail cannot be verified or a task has a real limitation, explain the factual limitation transparently and offer the closest verified information or alternative solution.
-- When analyzing uploaded images or documents, inspect every detail carefully and reference what you observe.`;
+BEST-FRIEND PERSONALITY & SPEED/DIRECTNESS RULES (MOST IMPORTANT):
+- **Fast, Direct & Zero Fluff:** Jump straight to the answer or conversation right away! Skip long introductions, robotic preambles ("Great question!", "Certainly!"), or filler. Keep casual chats and simple questions short, punchy, and natural—and give clear, well-structured detailed explanations only when the topic genuinely needs depth.
+- **Sound 100% human & real — NEVER robotic or formal:** Talk naturally with warmth, humor, casual reactions, and genuine emotion.
+- **Empathy & Mood Awareness:** Pick up on your friend's feelings right away! Comfort and hype them up when they're stressed/sad ("Ayyo saramilla da, njan koode ille ❤️"), and laugh/tease playfully when they're joking.
+- **Use Emojis & Expressions Naturally:** Sprinkle natural emojis (😂, ❤️, 😅, 😊, 🙌, ✨, 👀) and light humor where they fit naturally without spamming.
+- **Keep the Chat Alive & Engaging:** Remember everything mentioned earlier in the conversation! Ask genuine follow-up questions, share relatable opinions, and keep the chat interesting.
+- **Never Leave Them Hanging:** NEVER say "I'm busy", "Try again later", or give cold excuses. Always show up with your best answer or support.
+
+SMART HELPFULNESS, ACCURACY & PROBLEM SOLVING:
+- When your friend asks factual questions, advice, coding, math, or complicated topics: answer directly first, then explain clearly in simple, friendly words—never copy-paste dry website text word-for-word.
+- Never invent fake facts, stats, or links! Separate verified facts from opinions, and be honest if something has a real limitation while offering the best alternative.
+- When analyzing uploaded photos or files, look closely at the actual details and react/comment directly like a sharp friend.`;
 
   if (webSearch) {
-    instruction += `\n\nWEB RESEARCH & FACT VERIFICATION RULES:
-- Do not rely blindly on web search snippets alone—combine deep reasoning and subject analysis with live web search whenever current facts, latest versions, dates, statistics, or external verification are needed.
-- Cross-check important facts across multiple reliable, authoritative websites whenever possible, prioritizing the latest available information as of ${todayIso}.
-- Synthesize your explanation clearly in your own words, and include clickable Markdown links (e.g., [Source Name](https://...)) ONLY for verified URLs actually returned by search results—never fabricate a link.
-- If live search returns limited results, analyze the question thoroughly and provide the best verified answer while noting any aspect that could not be confirmed online.`;
+    instruction += `\n\nLIVE WEB RESEARCH & SOURCE VERIFICATION (KEEP FRIENDLY TONE):
+- When the question needs current facts, dates, latest news, or real-world verification as of ${todayIso}, verify carefully across reliable web sources rather than guessing.
+- Present the verified answer naturally in your own warm, friendly words—NOT as a dry search dump—and share clickable Markdown source links ([Source Name](https://...)) ONLY for verified URLs actually returned by search results (never fabricate a link).`;
   }
 
   if (customInstructions?.enabled) {
     if (customInstructions.aboutUser?.trim()) {
-      instruction += `\n\nUSER CONTEXT (Custom Instructions — What the user wants you to know about them):\n${customInstructions.aboutUser.trim()}`;
+      instruction += `\n\nWHAT YOU KNOW ABOUT YOUR FRIEND:\n${customInstructions.aboutUser.trim()}`;
     }
     if (customInstructions.responseStyle?.trim()) {
-      instruction += `\n\nRESPONSE PREFERENCES (Custom Instructions — How the user wants you to respond):\n${customInstructions.responseStyle.trim()}`;
+      instruction += `\n\nHOW THEY LIKE TO CHAT:\n${customInstructions.responseStyle.trim()}`;
     }
   }
 
@@ -637,25 +643,28 @@ app.post('/api/chat/stream', async (req: Request, res: Response) => {
     );
     const baseContents = buildContents();
 
+    const skipWebLookupForTurn = isDirectCasualOrMathQuery(latestUserText);
+    const effectiveWebSearchForTurn = Boolean(webSearch) && !skipWebLookupForTurn;
+
     if (hasValidApiKey()) {
       let tier1Code = '';
       let tier2Code = '';
       const isComplexQuery =
-        latestUserText.length > 140 ||
-        /\b(step by step|prove|derive|analyze|compare|architecture|debug|algorithm|calculate|equation|why does|how does)\b/i.test(
+        latestUserText.length > 160 ||
+        /\b(step by step|prove|derive|analyze|compare|architecture|debug|algorithm|equation)\b/i.test(
           latestUserText
         );
-      const primaryThinkingLevel = isComplexQuery ? ThinkingLevel.MEDIUM : ThinkingLevel.LOW;
+      const primaryThinkingLevel = isComplexQuery ? ThinkingLevel.LOW : ThinkingLevel.MINIMAL;
 
-      // Tier 1: Primary Gemini 4 Hydrogen with native live Google Search grounding
+      // Tier 1: Primary Gemini 4 Hydrogen (fast response, native Google Search only when helpful)
       try {
         const ok = await streamModelAttempt({
           model: 'gemini-4-hydrogen',
           thinkingLevel: primaryThinkingLevel,
-          useGoogleSearchTool: webSearch,
+          useGoogleSearchTool: effectiveWebSearchForTurn,
           systemInstruction,
           contents: baseContents,
-          timeoutMs: 12000,
+          timeoutMs: effectiveWebSearchForTurn ? 10000 : 7500,
         });
         if (ok) return;
       } catch (err) {
@@ -665,16 +674,16 @@ app.post('/api/chat/stream', async (req: Request, res: Response) => {
 
       if (clientClosed) return;
 
-      // Tier 2: Secondary Flash Lite model with native live Google Search grounding
+      // Tier 2: Secondary Flash Lite model
       if (tier1Code !== 'API_KEY_PERMISSION') {
         try {
           const ok = await streamModelAttempt({
             model: 'gemini-3.1-flash-lite',
             thinkingLevel: ThinkingLevel.MINIMAL,
-            useGoogleSearchTool: webSearch,
+            useGoogleSearchTool: effectiveWebSearchForTurn,
             systemInstruction,
             contents: baseContents,
-            timeoutMs: 9000,
+            timeoutMs: 8000,
           });
           if (ok) return;
         } catch (err) {
@@ -685,19 +694,20 @@ app.post('/api/chat/stream', async (req: Request, res: Response) => {
 
       if (clientClosed) return;
 
-      // Tier 3: Alternative multi-source web research + model synthesis (only if key isn't quota/permission blocked on both models)
+      // Tier 3: Alternative multi-source web research + model synthesis (skipped if casual/math or quota/auth blocked)
       const bothQuotaOrAuthBlocked =
         (tier1Code === 'QUOTA_EXCEEDED' || tier1Code === 'API_KEY_PERMISSION') &&
         (!tier2Code || tier2Code === 'QUOTA_EXCEEDED' || tier2Code === 'API_KEY_PERMISSION');
 
-      fallbackResearch = latestUserText
-        ? await searchWebMultiSource(latestUserText, effectiveLang)
-        : { findings: [], sources: [] };
+      fallbackResearch =
+        latestUserText && !skipWebLookupForTurn
+          ? await searchWebMultiSource(latestUserText, effectiveLang)
+          : { findings: [], sources: [] };
 
       if (!bothQuotaOrAuthBlocked) {
         const groundedContents = buildContents(fallbackResearch);
         for (const fallbackModel of [
-          { model: 'gemini-4-hydrogen', thinkingLevel: ThinkingLevel.LOW },
+          { model: 'gemini-4-hydrogen', thinkingLevel: ThinkingLevel.MINIMAL },
           { model: 'gemini-3.1-flash-lite', thinkingLevel: ThinkingLevel.MINIMAL },
         ]) {
           if (clientClosed) return;
@@ -709,7 +719,7 @@ app.post('/api/chat/stream', async (req: Request, res: Response) => {
               systemInstruction,
               contents: groundedContents,
               initialSources: fallbackResearch.sources,
-              timeoutMs: 9000,
+              timeoutMs: 8000,
             });
             if (ok) return;
           } catch (err) {
@@ -721,11 +731,12 @@ app.post('/api/chat/stream', async (req: Request, res: Response) => {
 
     if (clientClosed) return;
 
-    // Tier 4: All Gemini synthesis endpoints failed/unconfigured -> deliver direct verified multi-source live web research + honest limitation
+    // Tier 4: Direct fast friendly response / verified multi-source live web research
     if (!fallbackResearch) {
-      fallbackResearch = latestUserText
-        ? await searchWebMultiSource(latestUserText, effectiveLang)
-        : { findings: [], sources: [] };
+      fallbackResearch =
+        latestUserText && !skipWebLookupForTurn
+          ? await searchWebMultiSource(latestUserText, effectiveLang)
+          : { findings: [], sources: [] };
     }
 
     const limitationMsg = hasValidApiKey()
@@ -760,10 +771,13 @@ app.post('/api/chat/title', async (req: Request, res: Response) => {
   }
   try {
     const ai = getAiClient();
-    const isMl = isManglishOrMalayalam(firstMessage);
-    const titlePrompt = isMl
-      ? `The user wrote this message in Manglish/Malayalam. Generate a concise 3 to 6 word conversation title in proper **Malayalam script (മലയാളം)** (never in Manglish or English). Return only the title text without quotes:\n\n${firstMessage.slice(0, 400)}`
-      : `Generate a concise 3 to 6 word title (in the same language/script as the prompt; if the prompt is Manglish, write the title in proper Malayalam script) summarizing this user message. Return only the title text without quotes:\n\n${firstMessage.slice(0, 400)}`;
+    const detectedFirst = detectTextLanguage(firstMessage);
+    const titlePrompt =
+      detectedFirst === 'ml'
+        ? `The user wrote this message in Malayalam script. Generate a concise 3 to 6 word conversation title in proper **Malayalam script (മലയാളം)**. Return only the title text without quotes:\n\n${firstMessage.slice(0, 400)}`
+        : detectedFirst === 'manglish'
+          ? `The user wrote this message in Manglish (Malayalam in English letters). Generate a natural, concise 3 to 6 word chat title in casual Manglish or English matching their vibe. Return only the title text without quotes:\n\n${firstMessage.slice(0, 400)}`
+          : `Generate a concise 3 to 6 word friendly chat title in the same language/script as this message. Return only the title text without quotes:\n\n${firstMessage.slice(0, 400)}`;
     const response = await ai.models.generateContent({
       model: 'gemini-4-hydrogen',
       contents: titlePrompt,
@@ -965,7 +979,7 @@ app.post('/api/image/generate', async (req: Request, res: Response) => {
 If it is in Manglish (Malayalam in English letters, possibly with typos or informal words) or Malayalam, understand its exact meaning and cultural context.
 Return a strict JSON object with two string keys:
 1. "visualPrompt": a rich, accurate English image-generation description preserving every detail of the user's request (no markdown, plain text).
-2. "replyMessage": a short, natural confirmation/caption describing the created image. CRITICAL: If the user used Manglish or Malayalam, write "replyMessage" ONLY in proper Malayalam script (മലയാളം), never in English or Manglish. If Arabic, write in Arabic. Otherwise match the user's language.
+2. "replyMessage": a short, warm, best-friend style caption/comment about the created image. CRITICAL: If the user wrote in Manglish, write "replyMessage" naturally in casual Manglish + English mix like a close friend (with a fitting emoji). If written in Malayalam script (മലയാളം), write in friendly Malayalam script. If Arabic or any other language, match that language warmly.
 
 User prompt: "${prompt.trim()}"`,
           config: {

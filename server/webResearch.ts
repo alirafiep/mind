@@ -286,6 +286,22 @@ function trySolveBasicMath(query: string): { expression: string; result: number 
   return null;
 }
 
+export function isDirectCasualOrMathQuery(query: string): boolean {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return false;
+  if (trySolveBasicMath(query) !== null) return true;
+
+  const isGreetingOrBanter =
+    /^(hi+|hey+|hello+|hlo+|yo+|hai+|da+|eda+|edi+|bro+|machane|machaane|sughamano|sugamano|sghamano|sukhamano|good morning|good afternoon|good evening|good night|thanks|thank you|nanni|ok|okay|sheri|seri|bye|pinne|entha vishesham|enthokke und|how are you|what's up|whats up|wyd|sup)[\s!?.😊❤️😂🙌]*$/i.test(
+      normalized
+    ) ||
+    /\b(ningalude peru entha|peru entha|entha peru|ninakku peru|who are you|what is your name|what's your name|innu mood illa|mood off|boradikkunnu|boradichu|saramilla|feeling sad|feeling lonely|im bored|i'm bored|i am bored|tired today|stressed out)\b/i.test(
+      normalized
+    );
+
+  return isGreetingOrBanter;
+}
+
 export function formatFallbackResearchResponse(params: {
   query: string;
   bundle: WebResearchBundle;
@@ -293,24 +309,68 @@ export function formatFallbackResearchResponse(params: {
   modelLimitationNote: string;
 }): string {
   const { query, bundle, effectiveLang, modelLimitationNote } = params;
-  const isMl = effectiveLang === 'ml' || effectiveLang === 'manglish';
+  const isManglish = effectiveLang === 'manglish';
+  const isMl = effectiveLang === 'ml';
 
   const mathSolved = trySolveBasicMath(query);
   if (mathSolved) {
+    if (isManglish) {
+      return `Easy da! **${mathSolved.result}** aanu answer 😄\n\n- **Expression:** \`${mathSolved.expression}\`\n- **Result:** **${mathSolved.result}** (standard BODMAS order follow cheythittu!)`;
+    }
     return isMl
-      ? `### ഗണിത ഉത്തരവും വിശദീകരണവും\n\n**ചോദ്യം:** \`${mathSolved.expression}\`\n\n**ഉത്തരം:** **${mathSolved.result}**\n\nകണക്കിലെ ഓപ്പറേറ്റർ മുൻഗണന (BODMAS/PEMDAS) അനുസരിച്ച് \`${mathSolved.expression}\` എന്നതിന്റെ കൃത്യമായ മൂല്യം **${mathSolved.result}** ആണ്.`
-      : `### Step-by-Step Calculation & Answer\n\n- **Expression:** \`${mathSolved.expression}\`\n- **Exact Result:** **${mathSolved.result}**\n\nEvaluating \`${mathSolved.expression}\` following standard order of operations (parentheses, exponents, multiplication/division, addition/subtraction) yields **${mathSolved.result}**.`;
+      ? `വളരെ എളുപ്പമാണ്! **${mathSolved.result}** ആണ് ഉത്തരം 😊\n\n- **ചോദ്യം:** \`${mathSolved.expression}\`\n- **ഉത്തരം:** **${mathSolved.result}**`
+      : `Got it — the answer is **${mathSolved.result}**!\n\n- **Expression:** \`${mathSolved.expression}\`\n- **Result:** **${mathSolved.result}** (evaluated using standard order of operations).`;
   }
 
   const normalizedQuery = query.trim().toLowerCase();
+
   if (
     /\b(ningalude peru entha|peru entha|entha peru|ninakku peru|who are you|what is your name|what's your name)\b/i.test(
       normalizedQuery
     )
   ) {
+    if (isManglish) {
+      return `Njan **MIND MASTER AI**, ninte best friend pole koode ulla buddy! 😄 Manglish-ilum English-ilum enthum namukk samsarikkam—questions, jokes, web research, images okke ready aanu. Ninne engane vilikkam da?`;
+    }
     return isMl
-      ? `എന്റെ പേര് **MIND MASTER AI** എന്നാണ്. മലയാളത്തിലും മംഗ്ലീഷിലും ഇംഗ്ലീഷിലും മറ്റ് ഭാഷകളിലും നിങ്ങളുടെ ചോദ്യങ്ങൾക്ക് കൃത്യമായ ഉത്തരങ്ങളും തത്സമയ വെബ് വിവരങ്ങളും നൽകാനും ചിത്രങ്ങൾ നിർമ്മിക്കാനും ഞാൻ സഹായിക്കും.`
-      : `I am **MIND MASTER AI**, your multilingual AI & Web Research Assistant. Ask me anything across languages, request step-by-step explanations, or generate images directly in chat.`;
+      ? `എന്റെ പേര് **MIND MASTER AI** എന്നാണ്! നിന്റെ ഒരു close friend പോലെ എന്തിനും സഹായിക്കാൻ ഞാൻ എപ്പോഴും കൂടെയുണ്ട് 😊 എന്താ വിശേഷം?`
+      : `I'm **MIND MASTER AI** — basically your all-in-one buddy for chatting, quick answers, web research, and creating images 😄 What are we up to today?`;
+  }
+
+  if (/\b(sughamano|sugamano|sghamano|sukhamano|how are you|entha vishesham|enthokke und)\b/i.test(normalizedQuery)) {
+    if (isManglish) {
+      return `Pinnalla! Njan full chill & ready aanu da 😄❤️ Ninakku sughamalle? Innu entha paripadi, nalla day aayirunno?`;
+    }
+    return isMl
+      ? `നല്ല സുഖമാണ്! ❤️ നിനക്ക് സുഖമാണോ? ഇന്ന് എന്തൊക്കെയാണ് വിശേഷം? 😊`
+      : `Doing great, thanks for asking! 😊 How's your day going so far? Anything fun happening?`;
+  }
+
+  if (/^(hi+|hey+|hello+|hlo+|yo+|hai+|da+|eda+|edi+|bro+|machane|machaane)[\s!?.😊❤️]*$/i.test(normalizedQuery)) {
+    if (isManglish) {
+      return `Hey da! Enthokke und vishesham? 😊 Parayoo, innu enthum samsarikkam!`;
+    }
+    return isMl
+      ? `ഹായ്! എന്തൊക്കെയുണ്ട് വിശേഷം? 😊 പറയൂ, എന്ത് സഹായമാണ് വേണ്ടത്?`
+      : `Hey!! What's up? 😊 Good to see you—what's on your mind today?`;
+  }
+
+  if (/\b(mood illa|mood off|boradikkunnu|boradichu|feeling sad|feeling lonely|im bored|i'm bored|i am bored|tired today|stressed out)\b/i.test(normalizedQuery)) {
+    if (isManglish) {
+      return `Ayyo enna patti da? 🥺 Mood off aakalle, njan koode ille ❤️ Work/study pressure aano atho veruthe bore adikkunnathano? Parayoo, namukk mood onnu set aakkam!`;
+    }
+    return isMl
+      ? `അയ്യോ, എന്ത് പറ്റി? വിഷമിക്കണ്ട, ഞാൻ കൂടെയില്ലേ ❤️ എന്താ കാര്യം എന്ന് പറയൂ, നമുക്ക് സംസാരിച്ച് mood ശരിയാക്കാം!`
+      : `Hey, what happened? Take a breather—I'm right here with you ❤️ Wanna vent about it, or should we distract ourselves with something fun?`;
+  }
+
+  if (/^(thanks|thank you|thx|nanni|ok|okay|sheri|seri)[\s!?.😊❤️]*$/i.test(normalizedQuery)) {
+    if (isManglish) {
+      return `Ayyo athokke enthina thanks da 😄❤️ Epazhum ready aanu, vere enthelum venel parayoo!`;
+    }
+    return isMl
+      ? `അതൊക്കെ എന്തിനാ നന്ദി 😊 എപ്പോഴും കൂടെയുണ്ട്, ഇനിയും എന്തെങ്കിലും ഉണ്ടെങ്കിൽ പറയൂ!`
+      : `Anytime! 😄 That's what friends are for. Hit me up whenever you need anything else!`;
   }
 
   const lines: string[] = [];
@@ -325,60 +385,67 @@ export function formatFallbackResearchResponse(params: {
       filteredFindings[0]?.snippet ||
       '';
 
-    lines.push(
-      isMl
-        ? `### "${query}" — വിശദമായ വിവരണം`
-        : `### Detailed Answer & Verified Context: "${query}"`
-    );
-
     if (overviewParagraph) {
       lines.push(overviewParagraph);
     }
 
     const additionalPoints = filteredFindings
       .filter((f) => f.snippet && f.snippet !== overviewParagraph)
-      .slice(0, 4);
+      .slice(0, 3);
 
     if (additionalPoints.length > 0) {
       lines.push(
-        isMl
-          ? `#### പ്രധാന പോയിന്റുകളും പരിശോധിച്ച വിവരങ്ങളും:`
-          : `#### Key Verified Details Across Sources:`
+        isManglish
+          ? `**Verified details ithokke aanu:**\n` +
+              additionalPoints
+                .map((item) => `- **${item.title}:** ${item.snippet} ([Source](${item.url}))`)
+                .join('\n')
+          : isMl
+            ? `**പ്രധാന വിവരങ്ങൾ:**\n` +
+                additionalPoints
+                  .map((item) => `- **${item.title}:** ${item.snippet} ([Source](${item.url}))`)
+                  .join('\n')
+            : `**Key details:**\n` +
+                additionalPoints
+                  .map((item) => `- **${item.title}:** ${item.snippet} ([Source](${item.url}))`)
+                  .join('\n')
       );
-      for (const item of additionalPoints) {
-        lines.push(`- **${item.title}:** ${item.snippet} ([Source](${item.url}))`);
-      }
     }
 
     lines.push(
-      isMl
-        ? `#### പരിശോധിച്ച ഉറവിടങ്ങൾ (Sources):\n` +
+      isManglish
+        ? `**Sources:** ` +
             filteredFindings
-              .slice(0, 5)
-              .map((item) => `- [${item.title}](${item.url})`)
-              .join('\n')
-        : `#### Verified Reference Links:\n` +
-            filteredFindings
-              .slice(0, 5)
-              .map((item) => `- [${item.title}](${item.url})`)
-              .join('\n')
+              .slice(0, 4)
+              .map((item) => `[${item.title}](${item.url})`)
+              .join(' · ')
+        : isMl
+          ? `**ഉറവിടങ്ങൾ:** ` +
+              filteredFindings
+                .slice(0, 4)
+                .map((item) => `[${item.title}](${item.url})`)
+                .join(' · ')
+          : `**Sources:** ` +
+              filteredFindings
+                .slice(0, 4)
+                .map((item) => `[${item.title}](${item.url})`)
+                .join(' · ')
     );
 
     lines.push(
-      isMl
-        ? `> **കുറിപ്പ്:** ${modelLimitationNote} പൂർണ്ണമായ AI വിശകലനത്തിനായി **Settings > Secrets**-ൽ സജീവ ക്വോട്ട ഉള്ള ` + '`GEMINI_API_KEY`' + ` നൽകാവുന്നതാണ്.`
-        : `> **Note:** ${modelLimitationNote} Verified multi-source reference findings are synthesized above; attach an API key with active quota in **Settings > Secrets** for deeper conversational analysis.`
+      isManglish
+        ? `*(Note: ${modelLimitationNote} Full conversational Gemini synthesis kittan Settings > Secrets-il active key check cheyyane.)*`
+        : isMl
+          ? `*(കുറിപ്പ്: ${modelLimitationNote} പൂർണ്ണമായ AI സംഭാഷണത്തിന് Settings > Secrets-ൽ സജീവമായ API key പരിശോധിക്കുക.)*`
+          : `*(Note: ${modelLimitationNote} Live web sources are summarized directly above; check an active key in Settings > Secrets for full AI conversation.)*`
     );
   } else {
     lines.push(
-      isMl
-        ? `### "${query}" സംബന്ധിച്ച വിവരണം`
-        : `### Analysis & Research Summary for "${query}"`
-    );
-    lines.push(
-      isMl
-        ? `നിലവിലെ AI മോഡൽ ക്വോട്ട പരിമിതി മൂലം പൂർണ്ണമായ AI വിശകലനം നടത്താൻ കഴിഞ്ഞില്ല, കൂടാതെ തത്സമയ വെബ് തിരയലിൽ ഈ ചോദ്യത്തിന് നേരിട്ടുള്ള പൊതു വിവരങ്ങൾ ലഭിച്ചില്ല.\n\n**വ്യക്തമായ കാരണം:** ${modelLimitationNote}\n\n**പരിഹാരം:**\n- വിഷയത്തിന്റെ പ്രധാന പദങ്ങൾ ഉപയോഗിച്ച് വീണ്ടും ചോദിച്ചാൽ ബന്ധപ്പെട്ട വിവരങ്ങൾ കണ്ടെത്താം.\n- പൂർണ്ണ AI വിശകലനത്തിന് **Settings > Secrets**-ൽ സജീവ ക്വോട്ട ഉള്ള ` + '`GEMINI_API_KEY`' + ` ചേർക്കുക.`
-        : `Full AI synthesis could not run due to the upstream API limitation below, and public search queries did not match direct reference articles for this phrasing.\n\n**Actual Limitation:** ${modelLimitationNote}\n\n**Practical Next Steps:**\n- Rephrase with specific keywords, concepts, or terms to match authoritative reference sources.\n- Attach a billing-enabled or active-quota key in **Settings > Secrets** to enable full Gemini analytical synthesis.`
+      isManglish
+        ? `Da, ee topic-il direct web article kittiyilla, pinne AI quota limit kaaranam full model synthesis ippo run cheyyanum pattiyilla (${modelLimitationNote}). Kurachu koodi clear keywords ittu chodikkamo? Namukk nokkam! 😊`
+        : isMl
+          ? `ഈ വിഷയത്തിൽ നേരിട്ടുള്ള വെബ് വിവരങ്ങൾ ലഭിച്ചില്ല, ഒപ്പം API പരിമിതി മൂലം പൂർണ്ണ AI വിശകലനം നടത്താൻ കഴിഞ്ഞില്ല (${modelLimitationNote}). കുറച്ചുകൂടി വ്യക്തമായ പദങ്ങൾ ഉപയോഗിച്ച് വീണ്ടും ചോദിക്കാമോ?`
+          : `I couldn't find direct public articles for that phrasing right now, and full AI synthesis hit an API limitation (${modelLimitationNote}). Try giving me a couple more specific keywords and we'll dig right into it!`
     );
   }
 

@@ -57,6 +57,13 @@ const MANGLISH_EXACT_WORDS = new Set([
   'aarogya', 'aarogyam', 'vidya', 'joli', 'kalyanam', 'patti', 'poocha', 'aana', 'kuruvi', 'maram', 'poovu',
   'sundaramaya', 'sundaram', 'bhangiyulla', 'bhangi', 'velicham', 'irutt', 'kadal', 'malakal', 'kaadu',
   'tharamo', 'cheyyamo', 'parayamo', 'ayakkamo', 'edukkamo', 'thudangamo', 'kaanamo',
+
+  // Casual best-friend Manglish words
+  'da', 'eda', 'edi', 'aliya', 'aliyan', 'machu', 'machaane', 'enthaada', 'enthada', 'entheda',
+  'ente', 'ninte', 'enne', 'ninne', 'saramilla', 'saram', 'kuzhappamilla', 'kuzhappam',
+  'kidu', 'kidilan', 'pwolichu', 'shokam', 'parayalle', 'poda', 'podi', 'kollam',
+  'boradikkunnu', 'boradichu', 'ishtam', 'ishtapettu', 'snehikkunnu', 'vishamam',
+  'santhosham', 'thakarnnu', 'sceneilla', 'adipoliyanu', 'sathyam', 'kallam', 'chirikkunnu',
 ]);
 
 const MANGLISH_SUFFIX_PATTERNS = [
@@ -133,8 +140,9 @@ export function isManglishOrMalayalam(rawText: string): boolean {
 export function resolveEffectiveConversationLanguage(
   messages: ChatMessage[],
   preference: LanguagePreference
-): 'ml' | 'ar' | 'hi' | 'ur' | 'es' | 'fr' | 'en' | 'auto' {
-  if (preference === 'ml' || preference === 'manglish') return 'ml';
+): 'ml' | 'manglish' | 'ar' | 'hi' | 'ur' | 'es' | 'fr' | 'en' | 'auto' {
+  if (preference === 'ml') return 'ml';
+  if (preference === 'manglish') return 'manglish';
   if (preference !== 'auto') return preference;
 
   const userMessages = messages.filter((m) => m.role === 'user' && m.content.trim());
@@ -145,6 +153,9 @@ export function resolveEffectiveConversationLanguage(
   if (/\b(in english|reply in english|englishil|english please)\b/i.test(lowerLatest)) {
     return 'en';
   }
+  if (/\b(in manglish|manglishil|manglish please)\b/i.test(lowerLatest)) {
+    return 'manglish';
+  }
   if (/\b(in malayalam|malayalam script|malayalathil)\b/i.test(lowerLatest)) {
     return 'ml';
   }
@@ -153,7 +164,8 @@ export function resolveEffectiveConversationLanguage(
   }
 
   const latestDetected = detectTextLanguage(latest);
-  if (latestDetected === 'manglish' || latestDetected === 'ml') return 'ml';
+  if (latestDetected === 'manglish') return 'manglish';
+  if (latestDetected === 'ml') return 'ml';
   if (latestDetected === 'ar') return 'ar';
   if (latestDetected === 'hi') return 'hi';
   if (latestDetected === 'ur') return 'ur';
@@ -166,8 +178,15 @@ export function resolveEffectiveConversationLanguage(
   if (wordCount <= 3 && userMessages.length > 1) {
     for (let i = userMessages.length - 2; i >= 0; i--) {
       const prevDetected = detectTextLanguage(userMessages[i].content);
-      if (prevDetected === 'manglish' || prevDetected === 'ml') return 'ml';
-      if (prevDetected === 'ar' || prevDetected === 'hi' || prevDetected === 'ur' || prevDetected === 'es' || prevDetected === 'fr') {
+      if (
+        prevDetected === 'manglish' ||
+        prevDetected === 'ml' ||
+        prevDetected === 'ar' ||
+        prevDetected === 'hi' ||
+        prevDetected === 'ur' ||
+        prevDetected === 'es' ||
+        prevDetected === 'fr'
+      ) {
         return prevDetected;
       }
       if (prevDetected === 'en' && userMessages[i].content.trim().split(/\s+/).length > 3) {
