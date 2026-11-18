@@ -115,7 +115,6 @@ export function ChatWorkspace() {
     customInstructions,
     setActiveDocument,
     setActiveView,
-    setShowAuthModal,
     notify,
   } = useApp();
 
@@ -740,14 +739,6 @@ export function ChatWorkspace() {
       notify('Temporary chats cannot be shared.', 'info');
       return;
     }
-    if (!user) {
-      const transcript = activeChat.messages
-        .map((m) => `${m.role === 'user' ? 'User' : 'MindMaster AI'}:\n${m.content}`)
-        .join('\n\n---\n\n');
-      await navigator.clipboard.writeText(transcript).catch(() => {});
-      notify('Conversation transcript copied. Sign in to create shareable web links.', 'info');
-      return;
-    }
     try {
       await saveChat(activeChat);
       const res = await api.shareChat(activeChat.id);
@@ -848,9 +839,15 @@ export function ChatWorkspace() {
                   className="w-16 h-16 mx-auto rounded-2xl object-cover border border-slate-200 dark:border-slate-800 shadow-lg"
                 />
                 {(() => {
-                  const displayHandle = user
-                    ? getSafeDisplayName(user.username) || getSafeDisplayName(user.name)
-                    : null;
+                  const customName =
+                    user && user.name && user.name !== 'MindMaster User'
+                      ? getSafeDisplayName(user.name)
+                      : null;
+                  const customUsername =
+                    user && user.username && !/^User\d*$/i.test(user.username)
+                      ? getSafeDisplayName(user.username)
+                      : null;
+                  const displayHandle = customUsername || customName;
                   const greeting = getTimeGreeting();
                   return (
                     <>
@@ -1564,19 +1561,6 @@ export function ChatWorkspace() {
               </div>
             </div>
           </div>
-
-          {!user && (
-            <div className="mt-2 flex items-center justify-between text-[11px] text-slate-400 dark:text-slate-500 px-1">
-              <span>Exploring as guest · Sign in to save chats permanently</span>
-              <button
-                type="button"
-                onClick={() => setShowAuthModal(true)}
-                className="text-indigo-600 dark:text-sky-400 hover:underline cursor-pointer"
-              >
-                Sign In
-              </button>
-            </div>
-          )}
         </div>
       </div>
 

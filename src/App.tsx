@@ -9,7 +9,6 @@ import { DocumentStudio } from './components/DocumentStudio';
 import { LibraryView } from './components/LibraryView';
 import { ProfileView } from './components/ProfileView';
 import { UpgradeView } from './components/UpgradeView';
-import { AuthModal } from './components/AuthModal';
 import { CustomInstructionsModal } from './components/CustomInstructionsModal';
 import { SharedChatView } from './components/SharedChatView';
 import logoSymbol from './assets/images/ai_logo_symbol_1794559700521.jpg';
@@ -31,9 +30,7 @@ function MainShell() {
     toggleTheme,
     activeView,
     setActiveView,
-    user,
     isPro,
-    setShowAuthModal,
     toast,
   } = useApp();
 
@@ -114,16 +111,6 @@ function MainShell() {
                 <span>Upgrade to PRO</span>
               </button>
             )}
-
-            {!user && (
-              <button
-                type="button"
-                onClick={() => setShowAuthModal(true)}
-                className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer"
-              >
-                Sign In
-              </button>
-            )}
           </div>
         </header>
 
@@ -139,7 +126,6 @@ function MainShell() {
         </main>
       </div>
 
-      <AuthModal />
       <CustomInstructionsModal />
 
       {toast && (

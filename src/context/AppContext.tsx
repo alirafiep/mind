@@ -66,16 +66,13 @@ interface AppContextValue {
   activeView: WorkspaceView;
   setActiveView: (view: WorkspaceView) => void;
 
-  // Auth & Subscription
+  // Workspace Session & Subscription
   authReady: boolean;
   user: UserProfile | null;
   isPro: boolean;
   subscription: SubscriptionInfo;
   stripeEnabled: boolean;
   customInstructions: CustomInstructions;
-  signIn: (payload: { email: string; password: string }) => Promise<void>;
-  signUp: (payload: { email: string; password: string; name?: string }) => Promise<void>;
-  signOut: () => void;
   updateProfile: (updates: {
     name?: string;
     username?: string;
@@ -163,8 +160,6 @@ interface AppContextValue {
   continueEditingLibraryItem: (item: LibraryItem) => void;
 
   // Modals & Toast
-  showAuthModal: boolean;
-  setShowAuthModal: (open: boolean) => void;
   showInstructionsModal: boolean;
   setShowInstructionsModal: (open: boolean) => void;
   toast: { message: string; type: 'info' | 'success' | 'error' } | null;
@@ -208,7 +203,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [videoDraft, setVideoDraft] = useState<VideoDraftConfig | null>(null);
   const [activeDocument, setActiveDocument] = useState<LibraryItem | null>(null);
 
-  const [showAuthModal, setShowAuthModal] = useState(false);
   const [showInstructionsModal, setShowInstructionsModal] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'info' | 'success' | 'error' } | null>(null);
 
@@ -300,40 +294,88 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setPinnedPrompts(sortPinnedPrompts(pinsRes.pinnedPrompts));
   }, []);
 
+  const migrateLegacyLocalData = useCallback(async () => {
+    try {
+      const guestRaw = localStorage.getItem(GUEST_CHATS_KEY);
+      if (guestRaw) {
+        const guestChats = JSON.parse(guestRaw) as ChatSession[];
+        for (const gc of guestChats) {
+          if (!gc.isTemporary && gc.messages.length > 0) {
+            await api.saveChat(gc).catch(() => {});
+          }
+        }
+        localStorage.removeItem(GUEST_CHATS_KEY);
+      }
+      const guestLibRaw = localStorage.getItem(GUEST_LIBRARY_KEY);
+      if (guestLibRaw) {
+        const guestItems = JSON.parse(guestLibRaw) as LibraryItem[];
+        for (const gi of guestItems) {
+          await api.addLibraryItem(gi).catch(() => {});
+        }
+        localStorage.removeItem(GUEST_LIBRARY_KEY);
+      }
+      const guestPinsRaw = localStorage.getItem(GUEST_PINNED_PROMPTS_KEY);
+      if (guestPinsRaw) {
+        const guestPins = JSON.parse(guestPinsRaw) as PinnedPrompt[];
+        for (const gp of [...guestPins].reverse()) {
+          await api
+            .pinPrompt({
+              prompt: gp.prompt,
+              title: gp.title,
+              category: gp.category,
+              chatId: gp.chatId,
+              messageId: gp.messageId,
+              createdAt: gp.createdAt,
+            })
+            .catch(() => {});
+        }
+        localStorage.removeItem(GUEST_PINNED_PROMPTS_KEY);
+      }
+    } catch {
+      // ignore local storage migration errors
+    }
+  }, []);
+
+  const ensureWorkspaceSession = useCallback(async (): Promise<UserProfile> => {
+    const sessionRes = await api.initWorkspaceSession();
+    setStoredToken(sessionRes.token);
+    setUser(sessionRes.user);
+    setSubscription(sessionRes.subscription || DEFAULT_SUBSCRIPTION);
+    await migrateLegacyLocalData();
+    return sessionRes.user;
+  }, [migrateLegacyLocalData]);
+
   const refreshAccount = useCallback(async () => {
     try {
       const cfg = await api.getAuthConfig();
       setStripeEnabled(cfg.stripeEnabled);
 
       const token = getStoredToken();
-      if (!token) {
-        setUser(null);
-        const guestSub = await api.getSubscriptionStatus().catch(() => DEFAULT_SUBSCRIPTION);
-        setSubscription(guestSub);
-        loadGuestState();
-        return;
+      if (token) {
+        const me = await api.getMe().catch(() => ({
+          authenticated: false,
+          user: null,
+          subscription: null,
+        }));
+        if (me.authenticated && me.user) {
+          setUser(me.user);
+          setSubscription(me.subscription || DEFAULT_SUBSCRIPTION);
+          if (me.user.preferredLanguage) setLanguageState(me.user.preferredLanguage);
+          if (me.user.theme) setTheme(me.user.theme);
+          await loadAccountData();
+          return;
+        }
+        setStoredToken(null);
       }
 
-      const me = await api.getMe();
-      if (me.authenticated && me.user) {
-        setUser(me.user);
-        setSubscription(me.subscription || DEFAULT_SUBSCRIPTION);
-        if (me.user.preferredLanguage) setLanguageState(me.user.preferredLanguage);
-        if (me.user.theme) setTheme(me.user.theme);
-        await loadAccountData();
-      } else {
-        setStoredToken(null);
-        setUser(null);
-        const guestSub = await api.getSubscriptionStatus().catch(() => DEFAULT_SUBSCRIPTION);
-        setSubscription(guestSub);
-        loadGuestState();
-      }
+      await ensureWorkspaceSession();
+      await loadAccountData();
     } catch {
       loadGuestState();
     } finally {
       setAuthReady(true);
     }
-  }, [loadAccountData, loadGuestState]);
+  }, [ensureWorkspaceSession, loadAccountData, loadGuestState]);
 
   useEffect(() => {
     void refreshAccount();
@@ -355,90 +397,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, [notify]);
 
-  const handleSessionSuccess = useCallback(
-    async (res: { token: string; user: UserProfile; subscription: SubscriptionInfo }) => {
-      setStoredToken(res.token);
-      setUser(res.user);
-      setSubscription(res.subscription);
-      setShowAuthModal(false);
-      setActiveView('chat');
-
-      // Sync any guest chats created before signing in
-      try {
-        const guestRaw = localStorage.getItem(GUEST_CHATS_KEY);
-        if (guestRaw) {
-          const guestChats = JSON.parse(guestRaw) as ChatSession[];
-          for (const gc of guestChats) {
-            if (!gc.isTemporary && gc.messages.length > 0) {
-              await api.saveChat(gc).catch(() => {});
-            }
-          }
-          localStorage.removeItem(GUEST_CHATS_KEY);
-        }
-        const guestLibRaw = localStorage.getItem(GUEST_LIBRARY_KEY);
-        if (guestLibRaw) {
-          const guestItems = JSON.parse(guestLibRaw) as LibraryItem[];
-          for (const gi of guestItems) {
-            await api.addLibraryItem(gi).catch(() => {});
-          }
-          localStorage.removeItem(GUEST_LIBRARY_KEY);
-        }
-        const guestPinsRaw = localStorage.getItem(GUEST_PINNED_PROMPTS_KEY);
-        if (guestPinsRaw) {
-          const guestPins = JSON.parse(guestPinsRaw) as PinnedPrompt[];
-          for (const gp of [...guestPins].reverse()) {
-            await api
-              .pinPrompt({
-                prompt: gp.prompt,
-                title: gp.title,
-                category: gp.category,
-                chatId: gp.chatId,
-                messageId: gp.messageId,
-                createdAt: gp.createdAt,
-              })
-              .catch(() => {});
-          }
-          localStorage.removeItem(GUEST_PINNED_PROMPTS_KEY);
-        }
-      } catch {
-        // ignore guest sync errors
-      }
-
-      await loadAccountData();
-    },
-    [loadAccountData]
-  );
-
-  const signIn = useCallback(
-    async (payload: { email: string; password: string }) => {
-      const res = await api.signIn(payload);
-      await handleSessionSuccess(res);
-    },
-    [handleSessionSuccess]
-  );
-
-  const signUp = useCallback(
-    async (payload: { email: string; password: string; name?: string }) => {
-      const res = await api.signUp(payload);
-      await handleSessionSuccess(res);
-    },
-    [handleSessionSuccess]
-  );
-
-  const signOut = useCallback(() => {
-    setStoredToken(null);
-    setUser(null);
-    setSubscription(DEFAULT_SUBSCRIPTION);
-    api.getSubscriptionStatus().then(setSubscription).catch(() => {});
-    setChats([]);
-    setActiveChatId(null);
-    setPinnedPrompts([]);
-    setFolders([]);
-    setLibraryItems([]);
-    loadGuestState();
-    notify('Signed out. Sign back in anytime with your email and password.', 'info');
-  }, [loadGuestState, notify]);
-
   const updateProfile = useCallback(
     async (updates: {
       name?: string;
@@ -448,14 +406,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       customInstructions?: CustomInstructions;
     }) => {
       if (!user) {
-        setShowAuthModal(true);
-        throw new Error('Please sign in to save profile settings.');
+        await ensureWorkspaceSession();
       }
       const res = await api.updateProfile(updates);
       setUser(res.user);
-      notify('Profile settings saved.', 'success');
+      notify('Settings saved.', 'success');
     },
-    [notify, user]
+    [ensureWorkspaceSession, notify, user]
   );
 
   // Chats management
@@ -609,7 +566,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         persistGuestPinnedPrompts(next);
         return next;
       });
-      notify('Prompt pinned locally. Sign in to sync across sessions.', 'success');
+      notify('Prompt pinned to Pinned Prompts.', 'success');
       return localPin;
     },
     [notify, pinnedPrompts, user]
@@ -766,7 +723,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         persistGuestLibrary(next);
         return next;
       });
-      notify('Saved locally. Sign in to sync across devices.', 'info');
+      notify(`Saved "${localItem.title}" to My Library.`, 'success');
       return localItem;
     },
     [notify, user]
@@ -782,16 +739,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       textContent?: string;
     }) => {
       if (!user) {
-        setShowAuthModal(true);
-        notify('Sign in to upload files to your persistent library.', 'info');
-        return null;
+        await ensureWorkspaceSession();
       }
       const res = await api.uploadLibraryFile(payload);
       setLibraryItems((prev) => [res.item, ...prev]);
       notify(`Uploaded "${res.item.title}" to My Library.`, 'success');
       return res.item;
     },
-    [notify, user]
+    [ensureWorkspaceSession, notify, user]
   );
 
   const updateLibraryItem = useCallback(
@@ -833,36 +788,38 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const createFolder = useCallback(
     async (name: string) => {
       if (!user) {
-        setShowAuthModal(true);
-        notify('Sign in to create and organize folders.', 'info');
-        return;
+        await ensureWorkspaceSession();
       }
       const res = await api.createFolder(name);
       setFolders((prev) => [...prev, res.folder].sort((a, b) => a.name.localeCompare(b.name)));
       notify(`Folder "${res.folder.name}" created.`, 'success');
     },
-    [notify, user]
+    [ensureWorkspaceSession, notify, user]
   );
 
   const renameFolder = useCallback(
     async (id: string, name: string) => {
-      if (!user) return;
+      if (!user) {
+        await ensureWorkspaceSession();
+      }
       const res = await api.renameFolder(id, name);
       setFolders((prev) => prev.map((f) => (f.id === id ? res.folder : f)));
       notify('Folder renamed.', 'success');
     },
-    [notify, user]
+    [ensureWorkspaceSession, notify, user]
   );
 
   const deleteFolder = useCallback(
     async (id: string) => {
-      if (!user) return;
+      if (!user) {
+        await ensureWorkspaceSession();
+      }
       await api.deleteFolder(id);
       setFolders((prev) => prev.filter((f) => f.id !== id));
       setLibraryItems((prev) => prev.map((it) => (it.folderId === id ? { ...it, folderId: null } : it)));
       notify('Folder removed (items kept in Unfiled).', 'info');
     },
-    [notify, user]
+    [ensureWorkspaceSession, notify, user]
   );
 
   const continueEditingLibraryItem = useCallback(
@@ -938,9 +895,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         subscription,
         stripeEnabled,
         customInstructions,
-        signIn,
-        signUp,
-        signOut,
         updateProfile,
         setSubscription,
         refreshAccount,
@@ -976,8 +930,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         activeDocument,
         setActiveDocument,
         continueEditingLibraryItem,
-        showAuthModal,
-        setShowAuthModal,
         showInstructionsModal,
         setShowInstructionsModal,
         toast,

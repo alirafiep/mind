@@ -8,11 +8,11 @@ import sharp from 'sharp';
 import {
   activateProSubscription,
   addUserLibraryItem,
-  authenticateAccountUser,
   cancelProSubscription,
   createPinnedPrompt,
   createShareSnapshot,
   createUserFolder,
+  createWorkspaceUser,
   deletePinnedPrompt,
   deleteUserChat,
   deleteUserFolder,
@@ -29,7 +29,6 @@ import {
   incrementVideoUsage,
   isUserProActive,
   isUsernameAvailable,
-  registerAccountUser,
   renameUserFolder,
   resolveMediaFilePath,
   saveMediaBuffer,
@@ -190,56 +189,20 @@ app.get('/api/auth/config', (_req: Request, res: Response) => {
   });
 });
 
-app.post('/api/auth/signup', async (req: Request, res: Response) => {
-  const { email, password, name } = req.body as {
-    email?: string;
-    password?: string;
-    name?: string;
-  };
-  const result = await registerAccountUser({
-    email: email || '',
-    password: password || '',
-    name,
-  });
-  if (!result.user) {
-    return res.status(result.status || 400).json({ error: result.error || 'Unable to create account.' });
-  }
-  const token = signSessionToken(result.user.id, result.user.email);
-  const subscription = getSubscriptionInfo(result.user.id);
-  return res.status(201).json({ token, user: result.user, subscription });
-});
-
-app.post('/api/auth/signin', async (req: Request, res: Response) => {
-  const { email, password, name, mode } = req.body as {
-    email?: string;
-    password?: string;
-    name?: string;
-    mode?: 'signin' | 'signup';
-  };
-  if (mode === 'signup') {
-    const result = await registerAccountUser({
-      email: email || '',
-      password: password || '',
-      name,
-    });
-    if (!result.user) {
-      return res.status(result.status || 400).json({ error: result.error || 'Unable to create account.' });
+app.post('/api/workspace/session', (req: Request, res: Response) => {
+  const existingSession = extractAuthUser(req);
+  if (existingSession) {
+    const existingUser = getUserById(existingSession.uid);
+    if (existingUser) {
+      const subscription = getSubscriptionInfo(existingUser.id);
+      const token = signSessionToken(existingUser.id, existingUser.email || 'workspace@local');
+      return res.json({ token, user: existingUser, subscription });
     }
-    const token = signSessionToken(result.user.id, result.user.email);
-    const subscription = getSubscriptionInfo(result.user.id);
-    return res.status(201).json({ token, user: result.user, subscription });
   }
-
-  const result = authenticateAccountUser({
-    email: email || '',
-    password: password || '',
-  });
-  if (!result.user) {
-    return res.status(result.status || 401).json({ error: result.error || 'Invalid email or password.' });
-  }
-  const token = signSessionToken(result.user.id, result.user.email);
-  const subscription = getSubscriptionInfo(result.user.id);
-  return res.json({ token, user: result.user, subscription });
+  const user = createWorkspaceUser();
+  const token = signSessionToken(user.id, 'workspace@local');
+  const subscription = getSubscriptionInfo(user.id);
+  return res.status(201).json({ token, user, subscription });
 });
 
 app.get('/api/auth/username-available', (req: Request, res: Response) => {
@@ -273,7 +236,7 @@ app.get('/api/auth/me', (req: Request, res: Response) => {
 app.patch('/api/auth/profile', async (req: Request, res: Response) => {
   const session = extractAuthUser(req);
   if (!session) {
-    return res.status(401).json({ error: 'Sign in required to update profile settings.' });
+    return res.status(401).json({ error: 'Workspace session required to update profile settings.' });
   }
   const { name, username, preferredLanguage, theme, customInstructions } = req.body as {
     name?: string;
@@ -654,7 +617,7 @@ app.post('/api/chat/stream', async (req: Request, res: Response) => {
         /\b(step by step|prove|derive|analyze|compare|architecture|debug|algorithm|equation)\b/i.test(
           latestUserText
         );
-      const primaryThinkingLevel = isComplexQuery ? ThinkingLevel.LOW : ThinkingLevel.MINIMAL;
+      const primaryThinkingLevel = isComplexQuery ? ThinkingLevel.MEDIUM : ThinkingLevel.LOW;
 
       // Tier 1: Primary Gemini 4 Hydrogen (fast response, native Google Search only when helpful)
       try {
@@ -707,7 +670,7 @@ app.post('/api/chat/stream', async (req: Request, res: Response) => {
       if (!bothQuotaOrAuthBlocked) {
         const groundedContents = buildContents(fallbackResearch);
         for (const fallbackModel of [
-          { model: 'gemini-4-hydrogen', thinkingLevel: ThinkingLevel.MINIMAL },
+          { model: 'gemini-4-hydrogen', thinkingLevel: ThinkingLevel.LOW },
           { model: 'gemini-3.1-flash-lite', thinkingLevel: ThinkingLevel.MINIMAL },
         ]) {
           if (clientClosed) return;
@@ -1106,7 +1069,7 @@ app.post('/api/video/generate', async (req: Request, res: Response) => {
   const session = extractAuthUser(req);
   if (!session) {
     return res.status(401).json({
-      error: 'Sign in and upgrade to PRO to access AI Video Generation.',
+      error: 'Workspace session required. Upgrade to PRO to access AI Video Generation.',
       code: 'AUTH_REQUIRED',
     });
   }
@@ -1297,7 +1260,7 @@ app.delete('/api/chats/:id', async (req: Request, res: Response) => {
 app.post('/api/chats/:id/share', async (req: Request, res: Response) => {
   const session = extractAuthUser(req);
   if (!session) {
-    return res.status(401).json({ error: 'Sign in required to create a persistent share link.' });
+    return res.status(401).json({ error: 'Workspace session required to create a persistent share link.' });
   }
   const snapshot = await createShareSnapshot(session.uid, String(req.params.id));
   if (!snapshot) {
@@ -1551,7 +1514,7 @@ app.get('/api/subscription/status', (req: Request, res: Response) => {
 app.post('/api/subscription/checkout', async (req: Request, res: Response) => {
   const session = extractAuthUser(req);
   if (!session) {
-    return res.status(401).json({ error: 'Please sign in before upgrading to PRO.' });
+    return res.status(401).json({ error: 'Workspace session required before upgrading to PRO.' });
   }
 
   const {

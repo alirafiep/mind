@@ -33,7 +33,6 @@ const TYPE_FILTERS: Array<{ id: 'all' | LibraryItemType; label: string }> = [
 
 export function LibraryView() {
   const {
-    user,
     folders,
     libraryItems,
     createFolder,
@@ -43,7 +42,6 @@ export function LibraryView() {
     deleteLibraryItem,
     uploadFileToLibrary,
     continueEditingLibraryItem,
-    setShowAuthModal,
     notify,
   } = useApp();
 
@@ -205,21 +203,6 @@ export function LibraryView() {
             </button>
           </div>
         </div>
-
-        {!user && (
-          <div className="rounded-xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 p-4 flex flex-wrap items-center justify-between gap-3">
-            <p className="text-xs text-amber-800 dark:text-amber-200">
-              You are viewing local session storage. Sign in to connect your library permanently to your account across logouts and devices.
-            </p>
-            <button
-              type="button"
-              onClick={() => setShowAuthModal(true)}
-              className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold cursor-pointer"
-            >
-              Sign In Now
-            </button>
-          </div>
-        )}
 
         {showNewFolder && (
           <form onSubmit={handleCreateFolder} className="flex items-center gap-2 max-w-md">

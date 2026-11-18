@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { AtSign, Check, Crown, Loader2, LogOut, Moon, Sliders, Sun, User as UserIcon } from 'lucide-react';
+import { AtSign, Check, Crown, Loader2, Moon, Sliders, Sun } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { api } from '../services/api';
 
@@ -12,8 +12,6 @@ export function ProfileView() {
     theme,
     toggleTheme,
     updateProfile,
-    signOut,
-    setShowAuthModal,
     setShowInstructionsModal,
     setActiveView,
     notify,
@@ -64,23 +62,9 @@ export function ProfileView() {
   if (!user) {
     return (
       <div className="h-full flex items-center justify-center p-6">
-        <div className="max-w-md w-full rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 text-center space-y-4">
-          <div className="w-12 h-12 rounded-full bg-indigo-50 dark:bg-indigo-500/15 text-indigo-600 dark:text-sky-400 flex items-center justify-center mx-auto">
-            <UserIcon className="w-6 h-6" />
-          </div>
-          <h2 className="text-lg font-bold text-slate-900 dark:text-white">
-            Sign in to your account
-          </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            Sign in or create an account with your email and password to choose your unique username and sync your chat history, custom instructions, and library.
-          </p>
-          <button
-            type="button"
-            onClick={() => setShowAuthModal(true)}
-            className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold cursor-pointer"
-          >
-            Sign In / Create Account
-          </button>
+        <div className="flex items-center gap-2.5 text-sm text-slate-500 dark:text-slate-400">
+          <Loader2 className="w-4 h-4 animate-spin" />
+          <span>Loading workspace settings...</span>
         </div>
       </div>
     );
@@ -142,7 +126,11 @@ export function ProfileView() {
               <h2 className="text-base font-bold text-slate-900 dark:text-white">
                 {user.username ? `${user.username} (${user.name})` : user.name}
               </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{user.email}</p>
+              {user.email ? (
+                <p className="text-xs text-slate-500 dark:text-slate-400">{user.email}</p>
+              ) : (
+                <p className="text-xs text-slate-500 dark:text-slate-400">Personal Workspace</p>
+              )}
             </div>
           </div>
 
@@ -287,15 +275,6 @@ export function ProfileView() {
               <span>Custom Instructions</span>
             </span>
             <span className="text-xs text-indigo-600 dark:text-sky-400">Configure</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={signOut}
-            className="w-full flex items-center justify-center gap-2 p-3 rounded-xl border border-red-200 dark:border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 text-xs font-semibold cursor-pointer mt-2"
-          >
-            <LogOut className="w-4 h-4" />
-            <span>Sign Out</span>
           </button>
         </div>
       </div>

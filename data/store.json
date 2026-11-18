@@ -3,7 +3,7 @@
     "usr_fd9415c7b8ff2bd28e3e": {
       "id": "usr_fd9415c7b8ff2bd28e3e",
       "email": "lasinkc987@gmail.com",
-      "name": "lasinkc987",
+      "name": "Lasin kc",
       "authProvider": "account",
       "customInstructions": {
         "aboutUser": "",
@@ -12,7 +12,14 @@
       },
       "preferredLanguage": "auto",
       "theme": "dark",
-      "createdAt": 1794559511003
+      "createdAt": 1794559511003,
+      "username": "Lasin kc"
+    }
+  },
+  "credentials": {
+    "usr_fd9415c7b8ff2bd28e3e": {
+      "passwordHash": "bacbf98463dd9cda871d7f6a5f921f24:cbe2f7727d8c82aaa069bc25b779541b1f088499f440c9db565d237ad718f3bbe85f283e8149c2e8a1bfa095833084106bdcc56f00c0c056f49a7d94c562c909",
+      "updatedAt": 1794964535174
     }
   },
   "subscriptions": {
@@ -20,7 +27,7 @@
       "tier": "free",
       "plan": "none",
       "status": "none",
-      "imageUsageDate": "2026-11-13",
+      "imageUsageDate": "2026-11-18",
       "imageUsageToday": 0,
       "videoUsageMonthKey": "2026-11",
       "videoUsageMonth": 0,
@@ -30,6 +37,42 @@
   "guestImageUsage": {},
   "chats": {
     "usr_fd9415c7b8ff2bd28e3e": [
+      {
+        "id": "chat_1794964498121_vhx3d",
+        "title": "New Conversation",
+        "language": "auto",
+        "isTemporary": false,
+        "messages": [
+          {
+            "id": "msg_1794964498121_u",
+            "role": "user",
+            "content": "hi",
+            "attachments": [],
+            "timestamp": 1794964498121
+          },
+          {
+            "id": "msg_1794964498121_a",
+            "role": "assistant",
+            "content": "The connection closed before output was streamed. Please send your question again or rephrase with specific keywords to run a fresh multi-source web lookup.",
+            "timestamp": 1794964498121
+          },
+          {
+            "id": "msg_1794964544170_u",
+            "role": "user",
+            "content": "hi",
+            "attachments": [],
+            "timestamp": 1794964544170
+          },
+          {
+            "id": "msg_1794964544170_a",
+            "role": "assistant",
+            "content": "Hey! What’s up? How’s your day going so far? Anything fun happening, or are you just chilling? 😊",
+            "timestamp": 1794964544170
+          }
+        ],
+        "createdAt": 1794964498121,
+        "updatedAt": 1794964549178
+      },
       {
         "id": "chat_1794560971373_o0u23",
         "title": "New Conversation",

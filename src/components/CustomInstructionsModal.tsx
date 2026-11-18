@@ -8,8 +8,6 @@ export function CustomInstructionsModal() {
     setShowInstructionsModal,
     customInstructions,
     updateProfile,
-    user,
-    setShowAuthModal,
   } = useApp();
 
   const [aboutUser, setAboutUser] = useState(customInstructions.aboutUser);
@@ -27,11 +25,6 @@ export function CustomInstructionsModal() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) {
-      setShowInstructionsModal(false);
-      setShowAuthModal(true);
-      return;
-    }
     setSaving(true);
     try {
       await updateProfile({
@@ -120,7 +113,7 @@ export function CustomInstructionsModal() {
               className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white text-sm font-semibold flex items-center gap-2 cursor-pointer"
             >
               {saving && <Loader2 className="w-4 h-4 animate-spin" />}
-              <span>{user ? 'Save Instructions' : 'Sign In to Save'}</span>
+              <span>Save Instructions</span>
             </button>
           </div>
         </form>

@@ -87,16 +87,9 @@ export const api = {
       subscription: SubscriptionInfo | null;
     }>('/api/auth/me'),
 
-  signIn: (payload: { email: string; password: string }) =>
-    apiFetch<AuthSessionResponse>('/api/auth/signin', {
+  initWorkspaceSession: () =>
+    apiFetch<AuthSessionResponse>('/api/workspace/session', {
       method: 'POST',
-      body: JSON.stringify(payload),
-    }),
-
-  signUp: (payload: { email: string; password: string; name?: string }) =>
-    apiFetch<AuthSessionResponse>('/api/auth/signup', {
-      method: 'POST',
-      body: JSON.stringify(payload),
     }),
 
   checkUsernameAvailable: (username: string) =>

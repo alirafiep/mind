@@ -52,7 +52,6 @@ export interface SharedChatSnapshot {
 
 interface DatabaseSchema {
   users: Record<string, UserProfile>;
-  credentials: Record<string, { passwordHash: string; updatedAt: number }>;
   subscriptions: Record<string, ServerSubscriptionRecord>;
   guestImageUsage: Record<string, { date: string; count: number }>;
   chats: Record<string, ChatSession[]>;
@@ -82,7 +81,6 @@ export const PRO_DAILY_IMAGE_LIMIT = 150;
 function createEmptyDb(): DatabaseSchema {
   return {
     users: {},
-    credentials: {},
     subscriptions: {},
     guestImageUsage: {},
     chats: {},
@@ -102,11 +100,10 @@ function loadDb(): DatabaseSchema {
     const parsed = JSON.parse(raw) as Partial<DatabaseSchema>;
     const normalizedUsers: Record<string, UserProfile> = {};
     for (const [uid, user] of Object.entries(parsed.users || {})) {
-      normalizedUsers[uid] = { ...user, authProvider: 'account' };
+      normalizedUsers[uid] = { ...user, authProvider: 'workspace' };
     }
     return {
       users: normalizedUsers,
-      credentials: parsed.credentials || {},
       subscriptions: parsed.subscriptions || {},
       guestImageUsage: parsed.guestImageUsage || {},
       chats: parsed.chats || {},
@@ -184,65 +181,17 @@ function assignDefaultUniqueUsername(baseName: string, excludeUserId?: string): 
   return `User${Date.now().toString().slice(-6)}`;
 }
 
-function hashPassword(password: string): string {
-  const salt = crypto.randomBytes(16).toString('hex');
-  const derived = crypto.scryptSync(password, salt, 64).toString('hex');
-  return `${salt}:${derived}`;
-}
-
-function verifyPassword(password: string, storedHash: string): boolean {
-  const [salt, expectedHex] = storedHash.split(':');
-  if (!salt || !expectedHex) return false;
-  const derived = crypto.scryptSync(password, salt, 64);
-  const expected = Buffer.from(expectedHex, 'hex');
-  if (derived.length !== expected.length) return false;
-  return crypto.timingSafeEqual(derived, expected);
-}
-
-function normalizeEmail(raw: string): string | null {
-  const email = raw.trim().toLowerCase();
-  if (!email || email.length > 160) return null;
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return null;
-  return email;
-}
-
-export function getOrCreateUser(params: {
-  email: string;
-  name: string;
-  avatarUrl?: string;
-  authProvider?: 'account';
-}): UserProfile {
-  const normalizedEmail = params.email.trim().toLowerCase();
-  const userId = 'usr_' + crypto.createHash('sha256').update(normalizedEmail).digest('hex').slice(0, 20);
-  const emailPrefix = normalizedEmail.split('@')[0]?.replace(/[^a-zA-Z0-9_ .-]/g, '') || 'User';
-  const safeName =
-    params.name.trim() && !params.name.includes('@') ? params.name.trim() : emailPrefix || 'User';
-
-  const existing = dbState.users[userId];
-  if (existing) {
-    if (params.name.trim() && !params.name.includes('@')) {
-      existing.name = params.name.trim().slice(0, 80);
-    } else if (!existing.name) {
-      existing.name = safeName;
-    }
-    if (!existing.username) {
-      existing.username = assignDefaultUniqueUsername(existing.name, existing.id);
-    }
-    if (params.avatarUrl) existing.avatarUrl = params.avatarUrl;
-    existing.authProvider = 'account';
-    void persistDb();
-    return existing;
-  }
-
-  const defaultUsername = assignDefaultUniqueUsername(safeName, userId);
+export function createWorkspaceUser(): UserProfile {
+  const userId = 'usr_ws_' + crypto.randomBytes(10).toString('hex');
+  const safeName = 'MindMaster User';
+  const defaultUsername = assignDefaultUniqueUsername('User', userId);
 
   const created: UserProfile = {
     id: userId,
-    email: normalizedEmail,
+    email: '',
     name: safeName,
     username: defaultUsername,
-    avatarUrl: params.avatarUrl,
-    authProvider: 'account',
+    authProvider: 'workspace',
     customInstructions: { ...DEFAULT_INSTRUCTIONS },
     preferredLanguage: 'auto',
     theme: 'dark',
@@ -280,75 +229,6 @@ export function getOrCreateUser(params: {
 
   void persistDb();
   return created;
-}
-
-export async function registerAccountUser(params: {
-  email: string;
-  password: string;
-  name?: string;
-}): Promise<{ user?: UserProfile; error?: string; status?: number }> {
-  const email = normalizeEmail(params.email || '');
-  if (!email) {
-    return { error: 'Please enter a valid email address.', status: 400 };
-  }
-  const password = typeof params.password === 'string' ? params.password : '';
-  if (password.length < 6 || password.length > 128) {
-    return { error: 'Password must be between 6 and 128 characters.', status: 400 };
-  }
-
-  const userId = 'usr_' + crypto.createHash('sha256').update(email).digest('hex').slice(0, 20);
-  if (dbState.users[userId] && dbState.credentials[userId]?.passwordHash) {
-    return {
-      error: 'An account with this email already exists. Please sign in instead.',
-      status: 409,
-    };
-  }
-
-  const rawName = (params.name || '').trim().slice(0, 80);
-  const derivedName = rawName && !rawName.includes('@') ? rawName : email.split('@')[0] || 'User';
-
-  const user = getOrCreateUser({
-    email,
-    name: derivedName,
-    authProvider: 'account',
-  });
-  dbState.credentials[user.id] = {
-    passwordHash: hashPassword(password),
-    updatedAt: Date.now(),
-  };
-  await persistDb();
-  return { user };
-}
-
-export function authenticateAccountUser(params: {
-  email: string;
-  password: string;
-}): { user?: UserProfile; error?: string; status?: number } {
-  const email = normalizeEmail(params.email || '');
-  const password = typeof params.password === 'string' ? params.password : '';
-  if (!email || !password) {
-    return { error: 'Please enter both your email and password.', status: 400 };
-  }
-
-  const userId = 'usr_' + crypto.createHash('sha256').update(email).digest('hex').slice(0, 20);
-  const user = dbState.users[userId];
-  if (!user) {
-    return { error: 'Invalid email or password.', status: 401 };
-  }
-
-  const cred = dbState.credentials[userId];
-  if (!cred?.passwordHash) {
-    return {
-      error: 'No password is set for this email yet. Please use Sign Up to set your password.',
-      status: 401,
-    };
-  }
-
-  if (!verifyPassword(password, cred.passwordHash)) {
-    return { error: 'Invalid email or password.', status: 401 };
-  }
-
-  return { user };
 }
 
 export function getUserById(userId: string): UserProfile | null {

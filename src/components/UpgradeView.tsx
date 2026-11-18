@@ -24,12 +24,10 @@ const PRO_FEATURES = [
 
 export function UpgradeView() {
   const {
-    user,
     isPro,
     subscription,
     stripeEnabled,
     setSubscription,
-    setShowAuthModal,
     setActiveView,
     notify,
   } = useApp();
@@ -49,11 +47,6 @@ export function UpgradeView() {
   const priceLabel = billingCycle === 'monthly' ? '$19 / month' : '$180 / year';
 
   const handleStartUpgrade = async () => {
-    if (!user) {
-      setShowAuthModal(true);
-      notify('Please sign in first to upgrade your account to PRO.', 'info');
-      return;
-    }
 
     if (stripeEnabled) {
       setProcessing(true);

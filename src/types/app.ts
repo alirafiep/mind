@@ -47,7 +47,7 @@ export interface UserProfile {
   name: string;
   username?: string;
   avatarUrl?: string;
-  authProvider: 'account';
+  authProvider: 'workspace';
   customInstructions: CustomInstructions;
   preferredLanguage: LanguagePreference;
   theme: Theme;

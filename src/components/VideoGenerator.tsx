@@ -25,7 +25,6 @@ const VIDEO_STYLES: Array<{ id: VideoStyle; label: string }> = [
 
 export function VideoGenerator() {
   const {
-    user,
     isPro,
     subscription,
     setSubscription,
@@ -34,7 +33,6 @@ export function VideoGenerator() {
     videoDraft,
     setVideoDraft,
     setActiveView,
-    setShowAuthModal,
     notify,
   } = useApp();
 
@@ -97,10 +95,6 @@ export function VideoGenerator() {
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) {
-      setShowAuthModal(true);
-      return;
-    }
     if (!isPro) {
       setActiveView('upgrade');
       return;
